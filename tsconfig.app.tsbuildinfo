@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/api.test.ts","./src/api.ts","./src/auth.test.ts","./src/auth.ts","./src/google.d.ts","./src/main.tsx","./src/vite-env.d.ts","./src/components/AuthButton.tsx","./src/test/setup.ts"],"version":"5.7.3"}

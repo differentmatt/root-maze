@@ -1,0 +1,130 @@
+name: Deploy
+
+# main            -> prod   (root-maze-prod)
+# any other push  -> staging (root-maze-staging)  <- test here from your phone
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve environment from branch
+        id: env
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "name=prod"                 >> "$GITHUB_OUTPUT"
+            echo "stack=root-maze-prod"      >> "$GITHUB_OUTPUT"
+            echo "ref_pattern=ref:refs/heads/main" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=staging"              >> "$GITHUB_OUTPUT"
+            echo "stack=root-maze-staging"   >> "$GITHUB_OUTPUT"
+            echo "ref_pattern=*"             >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # --- Checks ---
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:run
+
+      - name: Backend deps + tests
+        run: |
+          cd backend
+          npm ci
+          npm test
+
+      # --- AWS credentials (OIDC, no stored keys) ---
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ github.ref == 'refs/heads/main' && secrets.AWS_DEPLOY_ROLE_PROD || secrets.AWS_DEPLOY_ROLE_STAGING }}
+          aws-region: us-east-1
+
+      # --- Infrastructure ---
+      - name: Deploy infrastructure
+        run: |
+          aws cloudformation deploy \
+            --stack-name ${{ steps.env.outputs.stack }} \
+            --template-file infra/template.yaml \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameter-overrides \
+              Environment=${{ steps.env.outputs.name }} \
+              AllowedRefPattern=${{ steps.env.outputs.ref_pattern }} \
+              GoogleClientId=${{ vars.VITE_GOOGLE_CLIENT_ID }} \
+              CreateOIDCProvider=false \
+            --no-fail-on-empty-changeset
+
+      - name: Read stack outputs
+        id: out
+        run: |
+          STACK=${{ steps.env.outputs.stack }}
+          get() { aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
+          echo "bucket=$(get BucketName)"           >> "$GITHUB_OUTPUT"
+          echo "distribution=$(get DistributionId)" >> "$GITHUB_OUTPUT"
+          echo "site_url=$(get SiteUrl)"            >> "$GITHUB_OUTPUT"
+          echo "me_fn=$(get MeFunctionName)"        >> "$GITHUB_OUTPUT"
+          echo "groups_fn=$(get GroupsFunctionName)">> "$GITHUB_OUTPUT"
+
+      # --- Frontend build + upload ---
+      - name: Build frontend
+        run: npm run build
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+
+      - name: Upload to S3
+        run: |
+          aws s3 sync dist/ s3://${{ steps.out.outputs.bucket }} --delete \
+            --exclude "assets/*" --cache-control "no-cache"
+          aws s3 sync dist/assets/ s3://${{ steps.out.outputs.bucket }}/assets/ \
+            --cache-control "public, max-age=31536000, immutable"
+
+      # --- Backend package + deploy ---
+      - name: Package backend
+        run: |
+          cd backend
+          rm -rf node_modules
+          npm ci --omit=dev
+          zip -r ../backend.zip package.json handlers/ lib/ node_modules/
+
+      - name: Update Lambda code
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ steps.out.outputs.me_fn }} \
+            --zip-file fileb://backend.zip >/dev/null
+          aws lambda update-function-code \
+            --function-name ${{ steps.out.outputs.groups_fn }} \
+            --zip-file fileb://backend.zip >/dev/null
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.out.outputs.distribution }} \
+            --paths "/*" >/dev/null
+
+      - name: Smoke test API
+        run: |
+          sleep 8
+          URL="${{ steps.out.outputs.site_url }}/api/me"
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$URL")
+          echo "GET $URL -> HTTP $STATUS"
+          # 401 = Lambda live and rejecting the unauthenticated probe (good).
+          # 503 = still the placeholder; 500 = broken.
+          if [ "$STATUS" != "401" ]; then
+            echo "::error::Expected 401 from deployed API, got $STATUS"
+            exit 1
+          fi
+          echo "Deployed: ${{ steps.out.outputs.site_url }}"
