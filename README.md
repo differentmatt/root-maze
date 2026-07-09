@@ -25,14 +25,7 @@ Do the three sections in order. **~15 minutes, once.**
 1. Sign in to the **AWS Console**, top-right region **N. Virginia
    (us-east-1)**.
 2. Click the **CloudShell** icon in the top toolbar (a `>_` prompt).
-3. The repo is **private**, so cloning needs a GitHub token. On your phone,
-   make a read-only one: github.com → your avatar → **Settings → Developer
-   settings → Personal access tokens → Fine-grained tokens → Generate new
-   token**. Repository access: **Only select repositories → root-maze**.
-   Permissions: **Contents → Read-only**. Generate, copy it.
-4. Paste and run in CloudShell (swap in your token + Client ID). Git will
-   prompt for a username (your GitHub username) and password (paste the
-   **token**):
+3. Paste and run (swap in your Client ID):
 
    ```bash
    git clone -b claude/root-maze https://github.com/differentmatt/root-maze
@@ -44,9 +37,9 @@ Do the three sections in order. **~15 minutes, once.**
    > add `CREATE_OIDC=true` before `bash`. (If you also run log-doom in this
    > account, leave it off — the provider already exists.)
 
-5. When it finishes it prints a block with **role ARNs** and **your two
+4. When it finishes it prints a block with **role ARNs** and **your two
    URLs**. Keep that open for the next section.
-6. Back in the **Google Console** (step 1.3), edit the OAuth client and add
+5. Back in the **Google Console** (step 1.3), edit the OAuth client and add
    both printed URLs as **Authorized JavaScript origins**:
    - `https://<something>.cloudfront.net` (staging)
    - `https://<something>.cloudfront.net` (prod)
