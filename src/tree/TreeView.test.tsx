@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import type { Graph } from '../api'
 import TreeView from './TreeView'
+import { inferSiblings } from './siblings'
 
 // Keep the real module (SUBTYPES, ApiError, types) but stub the network calls.
 vi.mock('../api', async (importOriginal) => ({
@@ -76,5 +77,40 @@ describe('TreeView', () => {
     expect(screen.getByText('Edit person')).toBeInTheDocument()
     // Ada's partner edge is described relative to Ada.
     expect(screen.getByText('partner of Bo')).toBeInTheDocument()
+  })
+})
+
+describe('inferSiblings', () => {
+  // mom & dad are the parents; kid1/kid2 share both, kid3 shares only mom.
+  function parentEdge(id: string, from: string, to: string): Graph['edges'][number] {
+    return {
+      edgeId: id, groupId: 'g', edgeKind: 'parent_child', fromPerson: from,
+      toPerson: to, subtype: 'biological', startDate: null, endDate: null,
+      createdAt: 't', updatedAt: 't', updatedBy: 'a',
+    }
+  }
+  const g: Graph = {
+    nodes: ['mom', 'dad', 'kid1', 'kid2', 'kid3'].map((id) => person(id, id)),
+    edges: [
+      parentEdge('e1', 'mom', 'kid1'),
+      parentEdge('e2', 'dad', 'kid1'),
+      parentEdge('e3', 'mom', 'kid2'),
+      parentEdge('e4', 'dad', 'kid2'),
+      parentEdge('e5', 'mom', 'kid3'),
+    ],
+  }
+
+  it('reports full siblings when the parent sets match', () => {
+    const sibs = inferSiblings(g, 'kid1')
+    expect(sibs.find((s) => s.nodeId === 'kid2')).toMatchObject({ half: false })
+  })
+
+  it('reports half siblings on partial parent overlap', () => {
+    const sibs = inferSiblings(g, 'kid1')
+    expect(sibs.find((s) => s.nodeId === 'kid3')).toMatchObject({ half: true })
+  })
+
+  it('returns nothing for a person with no parents', () => {
+    expect(inferSiblings(g, 'mom')).toEqual([])
   })
 })

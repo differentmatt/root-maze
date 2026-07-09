@@ -101,11 +101,20 @@ export default function GraphCanvas({
     return () => svg.removeEventListener('wheel', onWheel)
   }, [zoomAround])
 
+  // "Fullscreen" is a CSS overlay rather than the native Fullscreen API, which
+  // iOS Safari doesn't support for arbitrary elements. While open, lock body
+  // scroll and let Escape close it.
   useEffect(() => {
-    const onFs = () => setIsFull(document.fullscreenElement === wrapRef.current)
-    document.addEventListener('fullscreenchange', onFs)
-    return () => document.removeEventListener('fullscreenchange', onFs)
-  }, [])
+    if (!isFull) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setIsFull(false)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prev
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [isFull])
 
   function onPointerDown(e: React.PointerEvent) {
     svgRef.current?.setPointerCapture(e.pointerId)
@@ -153,14 +162,6 @@ export default function GraphCanvas({
     }
   }
 
-  function toggleFullscreen() {
-    if (document.fullscreenElement) {
-      document.exitFullscreen()
-    } else {
-      wrapRef.current?.requestFullscreen?.()
-    }
-  }
-
   // A tap only selects if the pointer didn't drag (which would be a pan).
   function selectIfTap(nodeId: string) {
     if (!moved.current) onSelect(nodeId)
@@ -179,7 +180,7 @@ export default function GraphCanvas({
       ref={wrapRef}
       className={
         isFull
-          ? 'relative flex h-full w-full items-center justify-center bg-zinc-950'
+          ? 'fixed inset-0 z-50 flex items-center justify-center bg-zinc-950 p-2'
           : 'relative'
       }
     >
@@ -265,12 +266,6 @@ export default function GraphCanvas({
       </svg>
 
       <div className="absolute right-2 top-2 flex flex-col gap-1">
-        <ControlButton label="Zoom in" onClick={() => zoomAround(cx(wrapRef), cy(wrapRef), 1.2)}>
-          +
-        </ControlButton>
-        <ControlButton label="Zoom out" onClick={() => zoomAround(cx(wrapRef), cy(wrapRef), 1 / 1.2)}>
-          −
-        </ControlButton>
         <ControlButton
           label="Reset view"
           onClick={() => setView({ x: 0, y: 0, k: 1 })}
@@ -279,23 +274,13 @@ export default function GraphCanvas({
         </ControlButton>
         <ControlButton
           label={isFull ? 'Exit fullscreen' : 'Fullscreen'}
-          onClick={toggleFullscreen}
+          onClick={() => setIsFull((v) => !v)}
         >
           {isFull ? '×' : '⤢'}
         </ControlButton>
       </div>
     </div>
   )
-}
-
-// Zoom-button anchor: the center of the graph container, in client coords.
-function cx(ref: React.RefObject<HTMLDivElement | null>) {
-  const r = ref.current?.getBoundingClientRect()
-  return r ? r.left + r.width / 2 : 0
-}
-function cy(ref: React.RefObject<HTMLDivElement | null>) {
-  const r = ref.current?.getBoundingClientRect()
-  return r ? r.top + r.height / 2 : 0
 }
 
 function ControlButton({

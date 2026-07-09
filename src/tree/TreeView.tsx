@@ -15,6 +15,7 @@ import {
   type EdgeInput,
 } from '../api'
 import GraphCanvas from './GraphCanvas'
+import { inferSiblings, type InferredSibling } from './siblings'
 
 type Status =
   | { state: 'loading' }
@@ -385,6 +386,10 @@ function PersonPanel({
   const candidates = graph.nodes.filter(
     (n) => n.nodeId !== person.nodeId && !connected.has(n.nodeId),
   )
+  const siblings = useMemo(
+    () => inferSiblings(graph, person.nodeId),
+    [graph, person.nodeId],
+  )
 
   async function save() {
     if (!name.trim()) return
@@ -466,6 +471,7 @@ function PersonPanel({
           myEdges={myEdges}
           names={names}
           candidates={candidates}
+          siblings={siblings}
           onChanged={onChanged}
         />
       </div>
@@ -487,6 +493,7 @@ function RelationshipsSection({
   myEdges,
   names,
   candidates,
+  siblings,
   onChanged,
 }: {
   groupId: string
@@ -494,6 +501,7 @@ function RelationshipsSection({
   myEdges: Edge[]
   names: Record<string, string>
   candidates: PersonNode[]
+  siblings: InferredSibling[]
   onChanged: () => void
 }) {
   const [choice, setChoice] = useState<RelChoice>('child_of')
@@ -560,6 +568,24 @@ function RelationshipsSection({
         </ul>
       ) : (
         <p className="text-xs text-zinc-500">No relationships yet.</p>
+      )}
+
+      {siblings.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <p className="text-xs uppercase tracking-wide text-zinc-500">
+            Siblings (inferred from shared parents)
+          </p>
+          <ul className="flex flex-col gap-0.5">
+            {siblings.map((s) => (
+              <li key={s.nodeId} className="text-sm text-zinc-400">
+                sibling of {s.name}
+                <span className="ml-2 text-xs text-zinc-500">
+                  {s.half ? 'half' : 'full'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {candidates.length > 0 ? (
