@@ -170,6 +170,65 @@ Resources:
         ZipFile: |
           exports.handler = async () => ({ statusCode: 503, body: '{"error":"Not deployed yet"}' });
 
+  # Phase 1 — person_node + edge handlers. All three functions ship the same
+  # backend bundle; the Handler field selects which entrypoint each one runs.
+  GraphFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-graph'
+      Runtime: nodejs20.x
+      Architectures: [arm64]
+      Handler: handlers/graph.handler
+      MemorySize: 256
+      Timeout: 10
+      ReservedConcurrentExecutions: 10
+      Role: !GetAtt ApiLambdaRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DataTable
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({ statusCode: 503, body: '{"error":"Not deployed yet"}' });
+
+  NodesFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-nodes'
+      Runtime: nodejs20.x
+      Architectures: [arm64]
+      Handler: handlers/nodes.handler
+      MemorySize: 256
+      Timeout: 10
+      ReservedConcurrentExecutions: 10
+      Role: !GetAtt ApiLambdaRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DataTable
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({ statusCode: 503, body: '{"error":"Not deployed yet"}' });
+
+  EdgesFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-edges'
+      Runtime: nodejs20.x
+      Architectures: [arm64]
+      Handler: handlers/edges.handler
+      MemorySize: 256
+      Timeout: 10
+      ReservedConcurrentExecutions: 10
+      Role: !GetAtt ApiLambdaRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DataTable
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({ statusCode: 503, body: '{"error":"Not deployed yet"}' });
+
   # --- API Gateway v2 (HTTP API) ---
   Api:
     Type: AWS::ApiGatewayV2::Api
@@ -203,6 +262,30 @@ Resources:
       IntegrationUri: !GetAtt GroupsFunction.Arn
       PayloadFormatVersion: '2.0'
 
+  GraphIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Api
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GraphFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  NodesIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Api
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt NodesFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  EdgesIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Api
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt EdgesFunction.Arn
+      PayloadFormatVersion: '2.0'
+
   MeGetRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
@@ -217,6 +300,57 @@ Resources:
       RouteKey: 'POST /api/groups'
       Target: !Sub 'integrations/${GroupsIntegration}'
 
+  # Phase 1 group-scoped routes. {groupId} is authorized by requireGroupMember
+  # inside each handler — the partition key is the isolation boundary.
+  GraphGetRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'GET /api/groups/{groupId}/graph'
+      Target: !Sub 'integrations/${GraphIntegration}'
+
+  NodesPostRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'POST /api/groups/{groupId}/nodes'
+      Target: !Sub 'integrations/${NodesIntegration}'
+
+  NodePatchRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'PATCH /api/groups/{groupId}/nodes/{nodeId}'
+      Target: !Sub 'integrations/${NodesIntegration}'
+
+  NodeDeleteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'DELETE /api/groups/{groupId}/nodes/{nodeId}'
+      Target: !Sub 'integrations/${NodesIntegration}'
+
+  EdgesPostRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'POST /api/groups/{groupId}/edges'
+      Target: !Sub 'integrations/${EdgesIntegration}'
+
+  EdgePatchRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'PATCH /api/groups/{groupId}/edges/{edgeId}'
+      Target: !Sub 'integrations/${EdgesIntegration}'
+
+  EdgeDeleteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'DELETE /api/groups/{groupId}/edges/{edgeId}'
+      Target: !Sub 'integrations/${EdgesIntegration}'
+
   MeFunctionApiPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -229,6 +363,30 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref GroupsFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
+
+  GraphFunctionApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GraphFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
+
+  NodesFunctionApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref NodesFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
+
+  EdgesFunctionApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref EdgesFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
@@ -394,5 +552,11 @@ Outputs:
     Value: !Ref MeFunction
   GroupsFunctionName:
     Value: !Ref GroupsFunction
+  GraphFunctionName:
+    Value: !Ref GraphFunction
+  NodesFunctionName:
+    Value: !Ref NodesFunction
+  EdgesFunctionName:
+    Value: !Ref EdgesFunction
   DeployRoleArn:
     Value: !GetAtt DeployRole.Arn

@@ -6,7 +6,8 @@ import {
   clearCredential,
   decodeEmail,
 } from './auth'
-import { getMe, createGroup, ApiError, type Me } from './api'
+import { getMe, createGroup, ApiError, type Me, type Group } from './api'
+import TreeView from './tree/TreeView'
 
 type Load =
   | { status: 'idle' }
@@ -19,6 +20,7 @@ export default function App() {
   const [load, setLoad] = useState<Load>({ status: 'idle' })
   const [name, setName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
 
   // Track sign-in/out.
   useEffect(() => onCredentialChange(setCred), [])
@@ -96,15 +98,11 @@ export default function App() {
           )}
 
           {load.status === 'ready' && load.me.groups.length > 0 && (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-              <p className="text-zinc-400">You're in group:</p>
-              <p className="mt-1 text-lg font-medium">
-                {load.me.groups[0].name}
-              </p>
-              <p className="mt-1 text-xs text-zinc-500">
-                role: {load.me.groups[0].role}
-              </p>
-            </div>
+            <GroupWorkspace
+              groups={load.me.groups}
+              activeGroupId={activeGroupId}
+              onSelect={setActiveGroupId}
+            />
           )}
 
           {load.status === 'ready' && load.me.groups.length === 0 && (
@@ -130,5 +128,40 @@ export default function App() {
         </section>
       )}
     </main>
+  )
+}
+
+// Once the caller is in at least one group, this is the workspace: an optional
+// switcher (only when they belong to more than one group) over the Phase 1
+// tree view. A person can belong to multiple groups, each an isolated graph.
+function GroupWorkspace({
+  groups,
+  activeGroupId,
+  onSelect,
+}: {
+  groups: Group[]
+  activeGroupId: string | null
+  onSelect: (groupId: string) => void
+}) {
+  const active =
+    groups.find((g) => g.groupId === activeGroupId) ?? groups[0]
+
+  return (
+    <div className="flex flex-col gap-4">
+      {groups.length > 1 && (
+        <select
+          value={active.groupId}
+          onChange={(e) => onSelect(e.target.value)}
+          className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+        >
+          {groups.map((g) => (
+            <option key={g.groupId} value={g.groupId}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+      )}
+      <TreeView group={active} />
+    </div>
   )
 }
