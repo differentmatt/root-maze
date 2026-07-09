@@ -100,6 +100,8 @@ jobs:
         run: npm run build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          # Drives the "(staging)" suffix on the app title (staging | prod).
+          VITE_APP_ENV: ${{ steps.env.outputs.name }}
 
       - name: Upload to S3
         run: |

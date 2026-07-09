@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import AuthButton from '../components/AuthButton'
 import { previewInvite, acceptInvite, type InvitePreview } from '../api'
+import { APP_TITLE } from '../appTitle'
 
 // The invitee's landing screen, reached via /?invite=<token>. It shows a
 // minimal preview (group name only) to both signed-out and signed-in visitors;
@@ -48,7 +49,7 @@ export default function JoinScreen({
 
   return (
     <main className="mx-auto flex min-h-full max-w-md flex-col gap-6 px-5 py-10">
-      <h1 className="text-xl font-semibold tracking-tight">Root Maze</h1>
+      <h1 className="text-xl font-semibold tracking-tight">{APP_TITLE}</h1>
 
       {loadError && <p className="text-red-400">Error: {loadError}</p>}
 

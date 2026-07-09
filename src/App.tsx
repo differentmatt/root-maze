@@ -10,6 +10,7 @@ import { getMe, createGroup, ApiError, type Me, type Group } from './api'
 import TreeView from './tree/TreeView'
 import MembersPanel from './members/MembersPanel'
 import JoinScreen from './members/JoinScreen'
+import { APP_TITLE } from './appTitle'
 
 type Load =
   | { status: 'idle' }
@@ -75,7 +76,7 @@ export default function App() {
   return (
     <main className="mx-auto flex min-h-full max-w-md flex-col gap-6 px-5 py-10">
       <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold tracking-tight">Root Maze</h1>
+        <h1 className="text-xl font-semibold tracking-tight">{APP_TITLE}</h1>
         {credential && (
           <button
             onClick={clearCredential}
