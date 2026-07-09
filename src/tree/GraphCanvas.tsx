@@ -39,6 +39,8 @@ export default function GraphCanvas({
 
   // Active pointers, so we can tell a one-finger pan from a two-finger pinch.
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map())
+  // Track in client (screen) coords so pan deltas are computed independently of
+  // view.k — the SVG CTM converts to user space without including the <g> transform.
   const lastPan = useRef<{ x: number; y: number } | null>(null)
   const pinchDist = useRef<number | null>(null)
   const moved = useRef(false)
@@ -126,7 +128,7 @@ export default function GraphCanvas({
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     moved.current = false
     if (pointers.current.size === 1) {
-      lastPan.current = toUser(e.clientX, e.clientY)
+      lastPan.current = { x: e.clientX, y: e.clientY }
     } else if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()]
       pinchDist.current = Math.hypot(a.x - b.x, a.y - b.y)
@@ -147,12 +149,13 @@ export default function GraphCanvas({
       pinchDist.current = dist
       moved.current = true
     } else if (pointers.current.size === 1 && lastPan.current) {
+      const screenDx = e.clientX - lastPan.current.x
+      const screenDy = e.clientY - lastPan.current.y
+      if (Math.abs(screenDx) + Math.abs(screenDy) > 4) moved.current = true
       const q = toUser(e.clientX, e.clientY)
-      const dx = q.x - lastPan.current.x
-      const dy = q.y - lastPan.current.y
-      if (Math.abs(dx) + Math.abs(dy) > 1) moved.current = true
-      setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }))
-      lastPan.current = q
+      const prev = toUser(lastPan.current.x, lastPan.current.y)
+      setView((v) => ({ ...v, x: v.x + (q.x - prev.x), y: v.y + (q.y - prev.y) }))
+      lastPan.current = { x: e.clientX, y: e.clientY }
     }
   }
 
@@ -161,7 +164,7 @@ export default function GraphCanvas({
     if (pointers.current.size < 2) pinchDist.current = null
     if (pointers.current.size === 1) {
       const [p] = [...pointers.current.values()]
-      lastPan.current = toUser(p.x, p.y)
+      lastPan.current = { x: p.x, y: p.y }
     } else if (pointers.current.size === 0) {
       lastPan.current = null
     }
@@ -256,6 +259,16 @@ export default function GraphCanvas({
                 key={n.nodeId}
                 transform={`translate(${p.x} ${p.y})`}
                 onClick={() => selectIfTap(n.nodeId)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    onSelect(n.nodeId)
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={n.name}
+                aria-pressed={selected}
                 className="cursor-pointer"
               >
                 <circle

@@ -42,14 +42,15 @@ function buildEdgeInput(
   otherId: string,
   subtype: string,
 ): EdgeInput {
+  const extra = subtype ? { subtype } : {}
   if (choice === 'partner_of') {
-    return { edgeKind: 'partner', fromPerson: refId, toPerson: otherId, subtype }
+    return { edgeKind: 'partner', fromPerson: refId, toPerson: otherId, ...extra }
   }
   if (choice === 'parent_of') {
-    return { edgeKind: 'parent_child', fromPerson: refId, toPerson: otherId, subtype }
+    return { edgeKind: 'parent_child', fromPerson: refId, toPerson: otherId, ...extra }
   }
   // child_of: the other person is the parent.
-  return { edgeKind: 'parent_child', fromPerson: otherId, toPerson: refId, subtype }
+  return { edgeKind: 'parent_child', fromPerson: otherId, toPerson: refId, ...extra }
 }
 
 // The Phase 1 group screen: the graph canvas, an add-person form (with an
@@ -542,6 +543,7 @@ function DeleteSection({
       onDeleted()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete')
+    } finally {
       setBusy(false)
     }
   }
