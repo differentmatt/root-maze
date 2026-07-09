@@ -9,11 +9,13 @@ vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api')>()),
   getGraph: vi.fn(),
   createNode: vi.fn(),
+  updateNode: vi.fn(),
+  deleteNode: vi.fn(),
   createEdge: vi.fn(),
   deleteEdge: vi.fn(),
 }))
 
-import { getGraph } from '../api'
+import { getGraph, updateNode, deleteNode } from '../api'
 
 const group = { groupId: 'grp_1', name: 'The Lotts', role: 'owner' }
 
@@ -97,6 +99,47 @@ describe('TreeView', () => {
     expect(screen.getByText('partner of Bo')).toBeInTheDocument()
     // The add-person form is hidden while editing a person.
     expect(screen.queryByText('Add a person')).not.toBeInTheDocument()
+  })
+
+  it('auto-saves an edited field after a pause (no Save button)', async () => {
+    vi.mocked(getGraph).mockResolvedValue(graph)
+    vi.mocked(updateNode).mockResolvedValue(graph.nodes[0])
+    render(<TreeView group={group} />)
+
+    await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Ada'))
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByDisplayValue('Ada'), {
+      target: { value: 'Ada L' },
+    })
+    await waitFor(
+      () =>
+        expect(updateNode).toHaveBeenCalledWith(
+          'grp_1',
+          'nod_a',
+          expect.objectContaining({ name: 'Ada L' }),
+        ),
+      { timeout: 2000 },
+    )
+  })
+
+  it('requires confirmation before deleting a person', async () => {
+    vi.mocked(getGraph).mockResolvedValue(graph)
+    vi.mocked(deleteNode).mockResolvedValue({ deleted: true })
+    render(<TreeView group={group} />)
+
+    await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Ada'))
+
+    fireEvent.click(screen.getByText('Delete person'))
+    expect(screen.getByText(/Delete Ada\?/)).toBeInTheDocument()
+    expect(deleteNode).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await waitFor(() =>
+      expect(deleteNode).toHaveBeenCalledWith('grp_1', 'nod_a'),
+    )
   })
 })
 

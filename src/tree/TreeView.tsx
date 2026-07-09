@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getGraph,
   createNode,
@@ -318,17 +318,21 @@ function AddPersonForm({
   return (
     <div className={cardClass}>
       <p className="text-sm font-medium text-zinc-300">Add a person</p>
-      <input
-        className={inputClass}
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Name"
-      />
-      <DateField
-        value={birthdate}
-        onChange={setBirthdate}
-        placeholder="Birthdate (optional)"
-      />
+      <Field label="Name">
+        <input
+          className={inputClass}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Ada Lovelace"
+        />
+      </Field>
+      <Field label="Birthdate (optional)">
+        <DateField
+          value={birthdate}
+          onChange={setBirthdate}
+          placeholder="Birthdate"
+        />
+      </Field>
       {error && <p className="text-sm text-red-400">{error}</p>}
       <button
         className={primaryBtn}
@@ -360,8 +364,15 @@ function PersonPanel({
   const [birthdate, setBirthdate] = useState(person.birthdate ?? '')
   const [deathdate, setDeathdate] = useState(person.deathdate ?? '')
   const [notes, setNotes] = useState(person.notes ?? '')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [save, setSave] = useState<SaveState>({ state: 'idle' })
+
+  // The last values we know are persisted, so we only auto-save real changes.
+  const saved = useRef({
+    name: person.name,
+    birthdate: person.birthdate ?? '',
+    deathdate: person.deathdate ?? '',
+    notes: person.notes ?? '',
+  })
 
   const names = useMemo(() => {
     const m: Record<string, string> = {}
@@ -386,24 +397,142 @@ function PersonPanel({
     [graph, person.nodeId],
   )
 
-  async function save() {
-    if (!name.trim()) return
-    setBusy(true)
-    setError(null)
-    try {
-      await updateNode(groupId, person.nodeId, {
-        name: name.trim(),
-        birthdate: birthdate.trim() || null,
-        deathdate: deathdate.trim() || null,
-        notes: notes.trim() || null,
-      })
-      onChanged()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save')
-    } finally {
-      setBusy(false)
+  // Auto-save: after a short pause once a field actually changes. An empty name
+  // is the one thing we refuse to persist.
+  useEffect(() => {
+    const dirty =
+      name !== saved.current.name ||
+      birthdate !== saved.current.birthdate ||
+      deathdate !== saved.current.deathdate ||
+      notes !== saved.current.notes
+    if (!dirty) return
+    if (!name.trim()) {
+      setSave({ state: 'error', message: 'Name can’t be empty' })
+      return
     }
-  }
+    const t = setTimeout(async () => {
+      setSave({ state: 'saving' })
+      try {
+        await updateNode(groupId, person.nodeId, {
+          name: name.trim(),
+          birthdate: birthdate.trim() || null,
+          deathdate: deathdate.trim() || null,
+          notes: notes.trim() || null,
+        })
+        saved.current = { name, birthdate, deathdate, notes }
+        setSave({ state: 'saved' })
+        onChanged()
+      } catch (err) {
+        setSave({
+          state: 'error',
+          message: err instanceof Error ? err.message : 'Save failed',
+        })
+      }
+    }, 700)
+    return () => clearTimeout(t)
+  }, [name, birthdate, deathdate, notes, groupId, person.nodeId, onChanged])
+
+  return (
+    <div className="flex flex-col gap-4 rounded-lg border border-zinc-700 bg-zinc-900 p-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-zinc-200">Edit person</p>
+        <div className="flex items-center gap-3">
+          <SaveStatus save={save} />
+          <button
+            onClick={onClose}
+            className="text-xs text-zinc-500 hover:text-zinc-300"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+
+      <Field label="Name">
+        <input
+          className={inputClass}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Ada Lovelace"
+        />
+      </Field>
+      <Field label="Birthdate">
+        <DateField value={birthdate} onChange={setBirthdate} placeholder="Birthdate" />
+      </Field>
+      <Field label="Death date">
+        <DateField value={deathdate} onChange={setDeathdate} placeholder="Death date" />
+      </Field>
+      <Field label="Notes">
+        <textarea
+          className={inputClass}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Anything worth remembering"
+          rows={2}
+        />
+      </Field>
+
+      <div className="border-t border-zinc-800 pt-3">
+        <p className="mb-2 text-sm font-medium text-zinc-300">Relationships</p>
+        <RelationshipsSection
+          groupId={groupId}
+          person={person}
+          myEdges={myEdges}
+          names={names}
+          candidates={candidates}
+          siblings={siblings}
+          onChanged={onChanged}
+        />
+      </div>
+
+      <DeleteSection groupId={groupId} person={person} onDeleted={onDeleted} />
+    </div>
+  )
+}
+
+type SaveState =
+  | { state: 'idle' | 'saving' | 'saved' }
+  | { state: 'error'; message: string }
+
+function SaveStatus({ save }: { save: SaveState }) {
+  if (save.state === 'saving')
+    return <span className="text-xs text-zinc-500">Saving…</span>
+  if (save.state === 'saved')
+    return <span className="text-xs text-emerald-500">Saved</span>
+  if (save.state === 'error')
+    return <span className="text-xs text-red-400">{save.message}</span>
+  return null
+}
+
+// Labelled field — the native date picker ignores placeholder text, so a label
+// is the only reliable way to say what each input is.
+function Field({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+      {label}
+      {children}
+    </label>
+  )
+}
+
+// Destructive, so it lives at the bottom behind an explicit confirm step.
+function DeleteSection({
+  groupId,
+  person,
+  onDeleted,
+}: {
+  groupId: string
+  person: PersonNode
+  onDeleted: () => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function remove() {
     setBusy(true)
@@ -418,58 +547,39 @@ function PersonPanel({
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-zinc-700 bg-zinc-900 p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-zinc-200">Edit person</p>
+    <div className="border-t border-zinc-800 pt-3">
+      {!confirming ? (
         <button
-          onClick={onClose}
-          className="text-xs text-zinc-500 hover:text-zinc-300"
+          onClick={() => setConfirming(true)}
+          className="text-sm text-red-400 hover:text-red-300"
         >
-          Close
+          Delete person
         </button>
-      </div>
-
-      <input
-        className={inputClass}
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Name"
-      />
-      <DateField value={birthdate} onChange={setBirthdate} placeholder="Birthdate" />
-      <DateField value={deathdate} onChange={setDeathdate} placeholder="Death date (optional)" />
-      <textarea
-        className={inputClass}
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        placeholder="Notes (optional)"
-        rows={2}
-      />
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      <div className="flex gap-2">
-        <button className={primaryBtn} onClick={save} disabled={busy || !name.trim()}>
-          {busy ? 'Saving…' : 'Save'}
-        </button>
-        <button
-          className="rounded-md border border-red-900 px-3 py-2 text-sm font-medium text-red-400 hover:bg-red-950 disabled:opacity-40"
-          onClick={remove}
-          disabled={busy}
-        >
-          Delete
-        </button>
-      </div>
-
-      <div className="border-t border-zinc-800 pt-3">
-        <p className="mb-2 text-sm font-medium text-zinc-300">Relationships</p>
-        <RelationshipsSection
-          groupId={groupId}
-          person={person}
-          myEdges={myEdges}
-          names={names}
-          candidates={candidates}
-          siblings={siblings}
-          onChanged={onChanged}
-        />
-      </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-zinc-300">
+            Delete {person.name}? This also removes their relationships and can’t
+            be undone.
+          </p>
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={remove}
+              disabled={busy}
+              className="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-40"
+            >
+              {busy ? 'Deleting…' : 'Delete'}
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              disabled={busy}
+              className="rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
