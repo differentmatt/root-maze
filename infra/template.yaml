@@ -26,6 +26,19 @@ Parameters:
     Type: String
     Default: ''
     Description: Google OAuth client ID, for server-side JWT verification.
+  DomainName:
+    Type: String
+    Default: ''
+    Description: >
+      Custom apex domain for this environment (prod only), e.g. rootmaze.com.
+      Empty = serve on the default CloudFront domain. When set, the
+      distribution also serves www.<DomainName>.
+  CertificateArn:
+    Type: String
+    Default: ''
+    Description: >
+      ACM certificate ARN (us-east-1) covering DomainName and www.DomainName.
+      Required to attach the custom domain.
   CreateOIDCProvider:
     Type: String
     Default: 'false'
@@ -37,6 +50,7 @@ Parameters:
 
 Conditions:
   ShouldCreateOIDCProvider: !Equals [!Ref CreateOIDCProvider, 'true']
+  HasCustomDomain: !Not [!Equals [!Ref CertificateArn, '']]
 
 Resources:
   # --- Static site bucket ---
@@ -226,6 +240,17 @@ Resources:
       DistributionConfig:
         Enabled: true
         DefaultRootObject: index.html
+        Aliases: !If
+          - HasCustomDomain
+          - - !Ref DomainName
+            - !Sub 'www.${DomainName}'
+          - !Ref AWS::NoValue
+        ViewerCertificate: !If
+          - HasCustomDomain
+          - AcmCertificateArn: !Ref CertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - !Ref AWS::NoValue
         HttpVersion: http2and3
         Origins:
           - Id: S3Origin
@@ -349,6 +374,9 @@ Resources:
                   - !Sub 'arn:aws:s3:::${AWS::StackName}-*/*'
               - Effect: Allow
                 Action: cloudfront:*
+                Resource: '*'
+              - Effect: Allow
+                Action: acm:DescribeCertificate
                 Resource: '*'
 
 Outputs:

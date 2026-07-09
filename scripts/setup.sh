@@ -13,6 +13,9 @@
 #   GOOGLE_CLIENT_ID  (required) Google OAuth Web client ID
 #   CREATE_OIDC       (optional) 'true' if this AWS account has no GitHub OIDC
 #                     provider yet. Default 'false' (log-doom already made one).
+#   PROD_DOMAIN       (optional) custom apex domain for prod, e.g. rootmaze.com
+#   PROD_CERT_ARN     (optional) ACM cert ARN (us-east-1) for PROD_DOMAIN and
+#                     www.PROD_DOMAIN. Get it from scripts/request-cert.sh.
 #   GITHUB_ORG        default: differentmatt
 #   GITHUB_REPO       default: root-maze
 
@@ -32,7 +35,7 @@ if [ ! -f "$TEMPLATE" ]; then
 fi
 
 deploy_stack() {
-  local env="$1" stack="$2" ref_pattern="$3"
+  local env="$1" stack="$2" ref_pattern="$3" domain="${4:-}" cert="${5:-}"
   echo ">> Deploying $stack ($env) ..."
   aws cloudformation deploy \
     --region "$REGION" \
@@ -46,6 +49,8 @@ deploy_stack() {
       GitHubOrg="$GITHUB_ORG" \
       GitHubRepo="$GITHUB_REPO" \
       CreateOIDCProvider="$CREATE_OIDC" \
+      DomainName="$domain" \
+      CertificateArn="$cert" \
     --no-fail-on-empty-changeset
   # Only the first stack should create the shared OIDC provider.
   CREATE_OIDC=false
@@ -57,7 +62,8 @@ output() {
 }
 
 deploy_stack staging root-maze-staging '*'
-deploy_stack prod    root-maze-prod    'ref:refs/heads/main'
+deploy_stack prod    root-maze-prod    'ref:refs/heads/main' \
+  "${PROD_DOMAIN:-}" "${PROD_CERT_ARN:-}"
 
 echo
 echo "=================================================================="

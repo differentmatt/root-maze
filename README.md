@@ -55,6 +55,14 @@ It prints the deploy-role ARNs and the site URLs. Then, in the GitHub repo
 Add each site URL as an Authorized JavaScript origin on the Google OAuth
 client. Subsequent pushes deploy automatically.
 
+### Custom domain (prod, optional)
+
+`scripts/request-cert.sh <domain>` requests an ACM certificate and prints the
+DNS validation records. Once the cert is issued, set repo **variables**
+`PROD_DOMAIN` and `PROD_CERT_ARN`, redeploy prod, and point the domain (and its
+`www` host) at the prod CloudFront distribution. Staging always stays on its
+default CloudFront domain.
+
 ## Architecture, schema, and key files
 
 See [`CLAUDE.md`](./CLAUDE.md).

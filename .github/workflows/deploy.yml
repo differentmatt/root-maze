@@ -55,7 +55,16 @@ jobs:
 
       # --- Infrastructure ---
       - name: Deploy infrastructure
+        env:
+          PROD_DOMAIN: ${{ vars.PROD_DOMAIN }}
+          PROD_CERT_ARN: ${{ vars.PROD_CERT_ARN }}
         run: |
+          # Custom domain only applies to prod; staging stays on its
+          # default CloudFront domain (empty params).
+          DOMAIN=""; CERT=""
+          if [ "${{ steps.env.outputs.name }}" = "prod" ]; then
+            DOMAIN="$PROD_DOMAIN"; CERT="$PROD_CERT_ARN"
+          fi
           aws cloudformation deploy \
             --stack-name ${{ steps.env.outputs.stack }} \
             --template-file infra/template.yaml \
@@ -65,6 +74,8 @@ jobs:
               AllowedRefPattern=${{ steps.env.outputs.ref_pattern }} \
               GoogleClientId=${{ vars.VITE_GOOGLE_CLIENT_ID }} \
               CreateOIDCProvider=false \
+              DomainName="$DOMAIN" \
+              CertificateArn="$CERT" \
             --no-fail-on-empty-changeset
 
       - name: Read stack outputs
