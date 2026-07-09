@@ -94,6 +94,22 @@ export async function createEdge(groupId, accountId, input) {
   if (!from) throw new ValidationError('fromPerson does not exist in this group')
   if (!to) throw new ValidationError('toPerson does not exist in this group')
 
+  // One relationship per pair: reject a second live edge between the same two
+  // people, in either direction and of any kind. (Two people being both
+  // partners and parent/child, or doubly-linked, is never what's meant.)
+  const existing = await queryPrefix(`GROUP#${groupId}`, 'EDGE#')
+  const duplicate = existing.some(
+    (e) =>
+      !e.deletedAt &&
+      ((e.fromPerson === fromPerson && e.toPerson === toPerson) ||
+        (e.fromPerson === toPerson && e.toPerson === fromPerson)),
+  )
+  if (duplicate) {
+    throw new ValidationError(
+      'These two people are already connected by a relationship',
+    )
+  }
+
   const subtype = resolveSubtype(edgeKind, input.subtype)
   const edgeId = newEdgeId()
   const now = new Date().toISOString()

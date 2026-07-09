@@ -68,6 +68,35 @@ describe('createEdge', () => {
     ).rejects.toThrow(/toPerson does not exist/)
   })
 
+  it('rejects a second relationship between the same two people', async () => {
+    vi.mocked(getNode)
+      .mockResolvedValueOnce({ nodeId: 'a' })
+      .mockResolvedValueOnce({ nodeId: 'b' })
+    // An existing edge in the reverse direction still counts as a duplicate.
+    vi.mocked(queryPrefix).mockResolvedValueOnce([
+      { edgeId: 'edg_1', fromPerson: 'b', toPerson: 'a', deletedAt: null },
+    ])
+    await expect(
+      createEdge('g1', 'acc_1', {
+        edgeKind: 'partner', fromPerson: 'a', toPerson: 'b',
+      }),
+    ).rejects.toThrow(/already connected/)
+    expect(putItem).not.toHaveBeenCalled()
+  })
+
+  it('allows a new edge when the only existing one was soft-deleted', async () => {
+    vi.mocked(getNode)
+      .mockResolvedValueOnce({ nodeId: 'a' })
+      .mockResolvedValueOnce({ nodeId: 'b' })
+    vi.mocked(queryPrefix).mockResolvedValueOnce([
+      { edgeId: 'edg_old', fromPerson: 'a', toPerson: 'b', deletedAt: 'gone' },
+    ])
+    const edge = await createEdge('g1', 'acc_1', {
+      edgeKind: 'partner', fromPerson: 'a', toPerson: 'b',
+    })
+    expect(edge.edgeId).toMatch(/^edg_/)
+  })
+
   it('writes an edge with a resolved subtype and logs it', async () => {
     vi.mocked(getNode)
       .mockResolvedValueOnce({ nodeId: 'a' })
