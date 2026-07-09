@@ -146,7 +146,6 @@ export default function TreeView({ group }: { group: Group }) {
               </p>
               <AddPersonForm
                 groupId={group.groupId}
-                people={graph.nodes}
                 onAdded={(newId) => {
                   setSelectedId(newId)
                   reload()
@@ -283,21 +282,17 @@ function RelationshipFields({
   )
 }
 
+// Adding a person only captures identity — relationships are managed in one
+// place, the person panel, by selecting the person afterward.
 function AddPersonForm({
   groupId,
-  people,
   onAdded,
 }: {
   groupId: string
-  people: PersonNode[]
   onAdded: (newNodeId: string) => void
 }) {
   const [name, setName] = useState('')
   const [birthdate, setBirthdate] = useState('')
-  const [withRel, setWithRel] = useState(false)
-  const [choice, setChoice] = useState<RelChoice>('child_of')
-  const [otherId, setOtherId] = useState('')
-  const [subtype, setSubtype] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -310,21 +305,10 @@ function AddPersonForm({
         name: name.trim(),
         birthdate: birthdate.trim() || null,
       })
-      if (withRel && otherId) {
-        await createEdge(
-          groupId,
-          buildEdgeInput(choice, node.nodeId, otherId, subtype),
-        )
-      }
       setName('')
       setBirthdate('')
-      setWithRel(false)
-      setOtherId('')
-      setSubtype('')
       onAdded(node.nodeId)
     } catch (err) {
-      // The person may have been created even if the relationship failed;
-      // surface the error and let the reload reflect reality.
       setError(err instanceof Error ? err.message : 'Failed to add')
     } finally {
       setBusy(false)
@@ -345,36 +329,11 @@ function AddPersonForm({
         onChange={setBirthdate}
         placeholder="Birthdate (optional)"
       />
-
-      {people.length > 0 && (
-        <label className="flex items-center gap-2 text-sm text-zinc-400">
-          <input
-            type="checkbox"
-            checked={withRel}
-            onChange={(e) => setWithRel(e.target.checked)}
-            className="h-4 w-4 accent-zinc-300"
-          />
-          Also link to someone
-        </label>
-      )}
-
-      {withRel && people.length > 0 && (
-        <RelationshipFields
-          choice={choice}
-          setChoice={setChoice}
-          otherId={otherId}
-          setOtherId={setOtherId}
-          subtype={subtype}
-          setSubtype={setSubtype}
-          candidates={people}
-        />
-      )}
-
       {error && <p className="text-sm text-red-400">{error}</p>}
       <button
         className={primaryBtn}
         onClick={submit}
-        disabled={busy || !name.trim() || (withRel && !otherId)}
+        disabled={busy || !name.trim()}
       >
         {busy ? 'Adding…' : 'Add person'}
       </button>
