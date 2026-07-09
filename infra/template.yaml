@@ -79,6 +79,11 @@ Resources:
     Properties:
       TableName: !Sub '${AWS::StackName}-data'
       BillingMode: PAY_PER_REQUEST
+      # Point-in-time recovery: continuous backups so a bad change (or a botched
+      # future migration) can be restored to any second in the last 35 days.
+      # Enabled on both stacks; the cost is negligible at this data size.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
       AttributeDefinitions:
         - AttributeName: PK
           AttributeType: S
