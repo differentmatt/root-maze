@@ -57,3 +57,114 @@ export function getMe(): Promise<Me> {
 export function createGroup(name: string): Promise<Group> {
   return request<Group>('POST', '/groups', { name })
 }
+
+// --- Phase 1: people (person_node) and relationships (edge) ---
+
+export interface PersonNode {
+  nodeId: string
+  groupId: string
+  name: string
+  birthdate: string | null
+  deathdate: string | null
+  notes: string | null
+  accountId: string | null
+  createdAt: string
+  updatedAt: string
+  updatedBy: string
+}
+
+export type EdgeKind = 'parent_child' | 'partner'
+
+export interface Edge {
+  edgeId: string
+  groupId: string
+  edgeKind: EdgeKind
+  fromPerson: string
+  toPerson: string
+  subtype: string
+  startDate: string | null
+  endDate: string | null
+  createdAt: string
+  updatedAt: string
+  updatedBy: string
+}
+
+export interface Graph {
+  nodes: PersonNode[]
+  edges: Edge[]
+}
+
+// Subtype vocabularies, mirrored from backend/lib/edges.js. The first entry is
+// the default the server falls back to when none is supplied.
+export const SUBTYPES: Record<EdgeKind, string[]> = {
+  parent_child: ['biological', 'step', 'adoptive', 'foster'],
+  partner: ['partner', 'married', 'remarried', 'ex'],
+}
+
+export interface NodeInput {
+  name?: string
+  birthdate?: string | null
+  deathdate?: string | null
+  notes?: string | null
+  accountId?: string | null
+}
+
+export interface EdgeInput {
+  edgeKind: EdgeKind
+  fromPerson: string
+  toPerson: string
+  subtype?: string
+  startDate?: string | null
+  endDate?: string | null
+}
+
+export function getGraph(groupId: string): Promise<Graph> {
+  return request<Graph>('GET', `/groups/${groupId}/graph`)
+}
+
+export function createNode(
+  groupId: string,
+  input: NodeInput,
+): Promise<PersonNode> {
+  return request<PersonNode>('POST', `/groups/${groupId}/nodes`, input)
+}
+
+export function updateNode(
+  groupId: string,
+  nodeId: string,
+  patch: NodeInput,
+): Promise<PersonNode> {
+  return request<PersonNode>('PATCH', `/groups/${groupId}/nodes/${nodeId}`, patch)
+}
+
+export function deleteNode(
+  groupId: string,
+  nodeId: string,
+): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(
+    'DELETE',
+    `/groups/${groupId}/nodes/${nodeId}`,
+  )
+}
+
+export function createEdge(groupId: string, input: EdgeInput): Promise<Edge> {
+  return request<Edge>('POST', `/groups/${groupId}/edges`, input)
+}
+
+export function updateEdge(
+  groupId: string,
+  edgeId: string,
+  patch: Partial<Pick<EdgeInput, 'subtype' | 'startDate' | 'endDate'>>,
+): Promise<Edge> {
+  return request<Edge>('PATCH', `/groups/${groupId}/edges/${edgeId}`, patch)
+}
+
+export function deleteEdge(
+  groupId: string,
+  edgeId: string,
+): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(
+    'DELETE',
+    `/groups/${groupId}/edges/${edgeId}`,
+  )
+}

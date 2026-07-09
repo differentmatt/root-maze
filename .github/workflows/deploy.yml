@@ -89,6 +89,9 @@ jobs:
           echo "site_url=$(get SiteUrl)"            >> "$GITHUB_OUTPUT"
           echo "me_fn=$(get MeFunctionName)"        >> "$GITHUB_OUTPUT"
           echo "groups_fn=$(get GroupsFunctionName)">> "$GITHUB_OUTPUT"
+          echo "graph_fn=$(get GraphFunctionName)"  >> "$GITHUB_OUTPUT"
+          echo "nodes_fn=$(get NodesFunctionName)"  >> "$GITHUB_OUTPUT"
+          echo "edges_fn=$(get EdgesFunctionName)"  >> "$GITHUB_OUTPUT"
 
       # --- Frontend build + upload ---
       - name: Build frontend
@@ -113,12 +116,16 @@ jobs:
 
       - name: Update Lambda code
         run: |
-          aws lambda update-function-code \
-            --function-name ${{ steps.out.outputs.me_fn }} \
-            --zip-file fileb://backend.zip >/dev/null
-          aws lambda update-function-code \
-            --function-name ${{ steps.out.outputs.groups_fn }} \
-            --zip-file fileb://backend.zip >/dev/null
+          for FN in \
+            ${{ steps.out.outputs.me_fn }} \
+            ${{ steps.out.outputs.groups_fn }} \
+            ${{ steps.out.outputs.graph_fn }} \
+            ${{ steps.out.outputs.nodes_fn }} \
+            ${{ steps.out.outputs.edges_fn }}; do
+            aws lambda update-function-code \
+              --function-name "$FN" \
+              --zip-file fileb://backend.zip >/dev/null
+          done
 
       - name: Invalidate CloudFront
         run: |

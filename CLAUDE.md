@@ -8,9 +8,16 @@ Stack and cloud approach are deliberately reused from the `log-doom` repo.
 
 ## Phase
 
-**Phase 0 (current): prove the loop.** No tree UI yet. Sign in with Google →
-land on a page that shows either "create a group" or "you're in group X".
-This exercises auth + group membership + DynamoDB + deploy end-to-end.
+**Phase 0 (done): prove the loop.** Sign in with Google → land on a page that
+shows either "create a group" or "you're in group X". This exercised auth +
+group membership + DynamoDB + deploy end-to-end.
+
+**Phase 1 (current): people + relationships.** `person_node` and `edge`
+(`edgeKind: parent_child | partner`) handlers, gated by the same
+`requireMember` group-isolation check, plus a minimal force-directed graph UI
+to add and view people and relationships. Soft-delete, `updatedAt`/`updatedBy`,
+and the nullable `accountId` on nodes are all preserved; deleting a person
+cascade-soft-deletes the edges that touch it.
 
 ## Commands
 
@@ -54,15 +61,18 @@ This exercises auth + group membership + DynamoDB + deploy end-to-end.
 | edit_log      | `GROUP#<groupId>`     | `LOG#<ulid>`      | append-only, never mutated |
 
 All mutable rows carry `updatedAt` / `updatedBy` and soft-delete `deletedAt`.
-`person_node` and `edge` are stubbed in the schema but have no handlers yet
-(Phase 1).
+`person_node` and `edge` handlers landed in Phase 1: reads via
+`GET /api/groups/{groupId}/graph`, writes via `POST/PATCH/DELETE` on
+`.../nodes[/{nodeId}]` and `.../edges[/{edgeId}]`.
 
 ## Key files
 
-- `src/App.tsx` — Phase 0 page (sign-in → group state)
+- `src/App.tsx` — sign-in → group state → tree workspace
+- `src/tree/` — `TreeView` (group screen), `GraphCanvas` + `layout` (SVG graph)
 - `src/auth.ts`, `src/api.ts` — client auth state + fetch wrapper
-- `backend/lib/` — `auth`, `dynamo`, `accounts`, `groups`, `ids`, `response`
-- `backend/handlers/` — `me` (GET /api/me), `groups` (POST /api/groups)
+- `backend/lib/` — `auth`, `dynamo`, `accounts`, `groups`, `nodes`, `edges`,
+  `graph`, `http` (auth+membership gate), `ids`, `errors`, `response`
+- `backend/handlers/` — `me`, `groups`, `graph`, `nodes`, `edges`
 - `infra/template.yaml` — one CloudFormation template, two stacks
 - `scripts/setup.sh` — one-time bootstrap (run in AWS CloudShell)
 - `.github/workflows/deploy.yml` — branch-routed deploy

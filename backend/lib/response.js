@@ -14,6 +14,10 @@ export function forbidden() {
   return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden' }) }
 }
 
+export function notFound(msg) {
+  return { statusCode: 404, body: JSON.stringify({ error: msg || 'Not found' }) }
+}
+
 export function serverError(msg) {
   return { statusCode: 500, body: JSON.stringify({ error: msg }) }
 }
