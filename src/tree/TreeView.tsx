@@ -89,47 +89,70 @@ export default function TreeView({ group }: { group: Group }) {
         <p className="text-lg font-medium">{group.name}</p>
       </div>
 
+      {status.state === 'loading' && <GraphLoading />}
+
       {status.state === 'error' && (
-        <p className="text-sm text-red-400">Error: {status.message}</p>
+        <div className="flex flex-col items-start gap-3 rounded-lg border border-red-900 bg-zinc-900 p-4">
+          <p className="text-sm text-red-400">Error: {status.message}</p>
+          <button
+            onClick={reload}
+            className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
+          >
+            Retry
+          </button>
+        </div>
       )}
 
-      <GraphCanvas
-        nodes={graph.nodes}
-        edges={graph.edges}
-        selectedId={selectedId}
-        onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))}
-      />
+      {status.state === 'ready' && (
+        <>
+          <GraphCanvas
+            nodes={graph.nodes}
+            edges={graph.edges}
+            selectedId={selectedId}
+            onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))}
+          />
 
-      <Legend />
+          <Legend />
 
-      {selected ? (
-        <PersonPanel
-          key={selected.nodeId}
-          groupId={group.groupId}
-          person={selected}
-          graph={graph}
-          onChanged={reload}
-          onDeleted={() => {
-            setSelectedId(null)
-            reload()
-          }}
-          onClose={() => setSelectedId(null)}
-        />
-      ) : (
-        <p className="text-sm text-zinc-500">
-          Tap a person in the graph to edit them or add relationships.
-        </p>
+          {selected ? (
+            <PersonPanel
+              key={selected.nodeId}
+              groupId={group.groupId}
+              person={selected}
+              graph={graph}
+              onChanged={reload}
+              onDeleted={() => {
+                setSelectedId(null)
+                reload()
+              }}
+              onClose={() => setSelectedId(null)}
+            />
+          ) : (
+            <p className="text-sm text-zinc-500">
+              Tap a person in the graph to edit them or add relationships.
+            </p>
+          )}
+
+          <AddPersonForm
+            groupId={group.groupId}
+            people={graph.nodes}
+            onAdded={(newId) => {
+              setSelectedId(newId)
+              reload()
+            }}
+          />
+        </>
       )}
-
-      <AddPersonForm
-        groupId={group.groupId}
-        people={graph.nodes}
-        onAdded={(newId) => {
-          setSelectedId(newId)
-          reload()
-        }}
-      />
     </section>
+  )
+}
+
+function GraphLoading() {
+  return (
+    <div className="flex h-64 flex-col items-center justify-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 text-sm text-zinc-500">
+      <span className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
+      Loading family graph…
+    </div>
   )
 }
 

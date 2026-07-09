@@ -67,6 +67,24 @@ describe('TreeView', () => {
     expect(getGraph).toHaveBeenCalledWith('grp_1')
   })
 
+  it('shows a loading state until the graph resolves', async () => {
+    let resolve!: (g: Graph) => void
+    vi.mocked(getGraph).mockReturnValue(
+      new Promise<Graph>((r) => {
+        resolve = r
+      }),
+    )
+    render(<TreeView group={group} />)
+
+    expect(screen.getByText('Loading family graph…')).toBeInTheDocument()
+    // The graph and add-person form aren't shown yet.
+    expect(screen.queryByText('Add a person')).not.toBeInTheDocument()
+
+    resolve(graph)
+    await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
+    expect(screen.queryByText('Loading family graph…')).not.toBeInTheDocument()
+  })
+
   it('opens the edit panel and shows the selected person’s relationships', async () => {
     vi.mocked(getGraph).mockResolvedValue(graph)
     render(<TreeView group={group} />)
