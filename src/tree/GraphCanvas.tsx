@@ -6,6 +6,7 @@ const WIDTH = 600
 const HEIGHT = 460
 const MIN_K = 0.4
 const MAX_K = 4
+const NODE_R = 18
 
 interface View {
   x: number
@@ -14,24 +15,27 @@ interface View {
 }
 
 // Renders the family graph as a pan/zoom SVG network: parent→child edges are
-// directed (blue, arrowhead points at the child); partner edges are undirected
-// (rose, dashed once ended). Drag to pan, wheel/pinch to zoom, and a button
-// toggles native fullscreen. Tap a person to select them.
+// directed (blue, a small arrowhead just off the child); partner edges are
+// undirected (rose, dashed once ended). Drag to pan, wheel/pinch to zoom, and a
+// button toggles a fullscreen overlay. Tap a person to select them. Fullscreen
+// state is owned by the parent so it can layer UI over the fullscreen graph.
 export default function GraphCanvas({
   nodes,
   edges,
   selectedId,
   onSelect,
+  isFull,
+  onFullscreenChange,
 }: {
   nodes: PersonNode[]
   edges: Edge[]
   selectedId: string | null
   onSelect: (nodeId: string) => void
+  isFull: boolean
+  onFullscreenChange: (next: boolean) => void
 }) {
-  const wrapRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 })
-  const [isFull, setIsFull] = useState(false)
 
   // Active pointers, so we can tell a one-finger pan from a two-finger pinch.
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map())
@@ -108,13 +112,14 @@ export default function GraphCanvas({
     if (!isFull) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setIsFull(false)
+    const onKey = (e: KeyboardEvent) =>
+      e.key === 'Escape' && onFullscreenChange(false)
     document.addEventListener('keydown', onKey)
     return () => {
       document.body.style.overflow = prev
       document.removeEventListener('keydown', onKey)
     }
-  }, [isFull])
+  }, [isFull, onFullscreenChange])
 
   function onPointerDown(e: React.PointerEvent) {
     svgRef.current?.setPointerCapture(e.pointerId)
@@ -177,7 +182,6 @@ export default function GraphCanvas({
 
   return (
     <div
-      ref={wrapRef}
       className={
         isFull
           ? 'fixed inset-0 z-50 flex items-center justify-center bg-zinc-950 p-2'
@@ -202,13 +206,13 @@ export default function GraphCanvas({
           <marker
             id="arrow"
             viewBox="0 0 10 10"
-            refX="9"
+            refX="8"
             refY="5"
-            markerWidth="6"
-            markerHeight="6"
-            orient="auto-start-reverse"
+            markerWidth="5"
+            markerHeight="5"
+            orient="auto"
           >
-            <path d="M0,0 L10,5 L0,10 z" fill="#38bdf8" />
+            <path d="M0,1 L9,5 L0,9" fill="none" stroke="#7dd3fc" strokeWidth="2" />
           </marker>
         </defs>
 
@@ -219,15 +223,24 @@ export default function GraphCanvas({
             if (!a || !b) return null
             const partner = e.edgeKind === 'partner'
             const ended = Boolean(e.endDate) || e.subtype === 'ex'
+            // Trim the segment to the circles' edges so the line meets the rims,
+            // and leave a little gap on the child end so the arrowhead sits just
+            // outside the circle instead of hidden under it.
+            const dx = b.x - a.x
+            const dy = b.y - a.y
+            const len = Math.hypot(dx, dy) || 1
+            const ux = dx / len
+            const uy = dy / len
+            const endGap = partner ? NODE_R : NODE_R + 6
             return (
               <line
                 key={e.edgeId}
-                x1={a.x}
-                y1={a.y}
-                x2={b.x}
-                y2={b.y}
+                x1={a.x + ux * NODE_R}
+                y1={a.y + uy * NODE_R}
+                x2={b.x - ux * endGap}
+                y2={b.y - uy * endGap}
                 stroke={partner ? '#fb7185' : '#38bdf8'}
-                strokeWidth={2}
+                strokeWidth={1.75}
                 strokeDasharray={ended ? '5 4' : undefined}
                 markerEnd={partner ? undefined : 'url(#arrow)'}
               />
@@ -246,7 +259,7 @@ export default function GraphCanvas({
                 className="cursor-pointer"
               >
                 <circle
-                  r={18}
+                  r={NODE_R}
                   fill={selected ? '#f4f4f5' : '#27272a'}
                   stroke={selected ? '#f4f4f5' : '#52525b'}
                   strokeWidth={2}
@@ -274,7 +287,7 @@ export default function GraphCanvas({
         </ControlButton>
         <ControlButton
           label={isFull ? 'Exit fullscreen' : 'Fullscreen'}
-          onClick={() => setIsFull((v) => !v)}
+          onClick={() => onFullscreenChange(!isFull)}
         >
           {isFull ? '×' : '⤢'}
         </ControlButton>

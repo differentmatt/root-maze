@@ -59,6 +59,7 @@ export default function TreeView({ group }: { group: Group }) {
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] })
   const [status, setStatus] = useState<Status>({ state: 'loading' })
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [isFull, setIsFull] = useState(false)
 
   const reload = useCallback(async () => {
     try {
@@ -81,6 +82,23 @@ export default function TreeView({ group }: { group: Group }) {
   }, [reload])
 
   const selected = graph.nodes.find((n) => n.nodeId === selectedId) ?? null
+
+  // One panel element, shown inline normally or layered over the graph while
+  // fullscreen — so selecting a person in fullscreen doesn't drop you out of it.
+  const panel = selected ? (
+    <PersonPanel
+      key={selected.nodeId}
+      groupId={group.groupId}
+      person={selected}
+      graph={graph}
+      onChanged={reload}
+      onDeleted={() => {
+        setSelectedId(null)
+        reload()
+      }}
+      onClose={() => setSelectedId(null)}
+    />
+  ) : null
 
   return (
     <section className="flex flex-col gap-5">
@@ -110,37 +128,42 @@ export default function TreeView({ group }: { group: Group }) {
             edges={graph.edges}
             selectedId={selectedId}
             onSelect={(id) => setSelectedId((cur) => (cur === id ? null : id))}
+            isFull={isFull}
+            onFullscreenChange={setIsFull}
           />
 
-          <Legend />
-
-          {selected ? (
-            <PersonPanel
-              key={selected.nodeId}
-              groupId={group.groupId}
-              person={selected}
-              graph={graph}
-              onChanged={reload}
-              onDeleted={() => {
-                setSelectedId(null)
-                reload()
-              }}
-              onClose={() => setSelectedId(null)}
-            />
-          ) : (
-            <p className="text-sm text-zinc-500">
-              Tap a person in the graph to edit them or add relationships.
-            </p>
+          {/* Inline layout (not fullscreen). Editing a person replaces the
+              add-person form so the screen stays focused on that person. */}
+          {!isFull && (
+            <>
+              <Legend />
+              {selected ? (
+                panel
+              ) : (
+                <>
+                  <p className="text-sm text-zinc-500">
+                    Tap a person in the graph to edit them or add relationships.
+                  </p>
+                  <AddPersonForm
+                    groupId={group.groupId}
+                    people={graph.nodes}
+                    onAdded={(newId) => {
+                      setSelectedId(newId)
+                      reload()
+                    }}
+                  />
+                </>
+              )}
+            </>
           )}
 
-          <AddPersonForm
-            groupId={group.groupId}
-            people={graph.nodes}
-            onAdded={(newId) => {
-              setSelectedId(newId)
-              reload()
-            }}
-          />
+          {/* Fullscreen: the graph is a full-screen overlay; layer the edit
+              panel over its lower half as a scrollable sheet. */}
+          {isFull && selected && (
+            <div className="fixed inset-x-0 bottom-0 z-[60] max-h-[70vh] overflow-y-auto border-t border-zinc-700 bg-zinc-950 p-4">
+              {panel}
+            </div>
+          )}
         </>
       )}
     </section>

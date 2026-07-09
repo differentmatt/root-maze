@@ -95,6 +95,8 @@ describe('TreeView', () => {
     expect(screen.getByText('Edit person')).toBeInTheDocument()
     // Ada's partner edge is described relative to Ada.
     expect(screen.getByText('partner of Bo')).toBeInTheDocument()
+    // The add-person form is hidden while editing a person.
+    expect(screen.queryByText('Add a person')).not.toBeInTheDocument()
   })
 })
 
