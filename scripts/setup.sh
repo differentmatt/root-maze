@@ -1,17 +1,13 @@
 #!/usr/bin/env bash
 #
-# One-time bootstrap for Root Maze. Run this in AWS CloudShell (the terminal
-# built into the AWS Console — works from a phone browser, already logged in).
+# One-time bootstrap for Root Maze. Creates the staging and prod CloudFormation
+# stacks. Run once against the target AWS account with credentials available —
+# e.g. in AWS CloudShell, or locally with the AWS CLI configured.
 #
-#   1. Open the AWS Console in your browser, region us-east-1.
-#   2. Click the CloudShell icon (top toolbar).
-#   3. Paste:
-#        curl -s https://raw.githubusercontent.com/differentmatt/root-maze/claude/root-maze/scripts/setup.sh | \
-#          GOOGLE_CLIENT_ID=your-id.apps.googleusercontent.com bash
-#      (or clone the repo and run: GOOGLE_CLIENT_ID=... bash scripts/setup.sh)
+#   GOOGLE_CLIENT_ID=your-id.apps.googleusercontent.com bash scripts/setup.sh
 #
-# It creates the staging and prod CloudFormation stacks. After the first run,
-# GitHub Actions takes over deploys via the OIDC roles printed at the end.
+# After the first run, GitHub Actions takes over deploys via the OIDC roles
+# printed at the end.
 #
 # Env vars:
 #   GOOGLE_CLIENT_ID  (required) Google OAuth Web client ID

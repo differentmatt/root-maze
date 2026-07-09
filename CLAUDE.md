@@ -2,7 +2,7 @@
 
 A casual, **shared** family-tree mobile web app. Multiple family members edit
 one graph (people + relationships). Graph display, not a strict hierarchy.
-Developed entirely from a phone — push to a branch, GitHub Actions deploys.
+Push to a branch and GitHub Actions deploys.
 
 Stack and cloud approach are deliberately reused from the `log-doom` repo.
 
@@ -69,5 +69,4 @@ All mutable rows carry `updatedAt` / `updatedBy` and soft-delete `deletedAt`.
 
 ## First-time setup
 
-See `README.md` for the click-by-click dashboard steps (Google OAuth client,
-AWS CloudShell bootstrap, GitHub secrets).
+See `README.md` for deployment and first-time infrastructure setup.

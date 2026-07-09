@@ -1,73 +1,60 @@
-# Root Maze — setup (all from your phone)
+# Root Maze
 
-A shared family tree. Phase 0 proves the full loop: **sign in with Google →
-see "you're in group X"**, deployed to AWS via GitHub Actions.
+A casual, shared family-tree web app. Multiple family members edit one graph
+(people + relationships); graph display, not a strict hierarchy. Mobile-first.
 
-You never need a laptop. Everything below is a browser + the GitHub mobile app.
-Do the three sections in order. **~15 minutes, once.**
+## Phase
 
----
+**Phase 0 (current): prove the loop.** No tree UI yet — sign in with Google and
+land on a page that shows either "create a group" or "you're in group X". This
+exercises auth + group membership + DynamoDB + deploy end to end.
 
-## 1. Google OAuth client (Google Cloud Console)
+## Stack
 
-1. Go to **console.cloud.google.com** → create a project (or reuse one).
-2. **APIs & Services → OAuth consent screen** → choose **External** → fill in
-   app name + your email → Save. Add yourself under **Test users**.
-3. **APIs & Services → Credentials → Create credentials → OAuth client ID**.
-   - Application type: **Web application**.
-   - **Authorized JavaScript origins**: leave empty for now — you'll add the
-     two CloudFront URLs after step 2 (they don't exist yet).
-4. Copy the **Client ID** (looks like `1234-abcd.apps.googleusercontent.com`).
-   You'll paste it in the next two sections.
+- **Frontend**: React 19 + TypeScript + Vite + Tailwind CSS v4, PWA-ready.
+  Dark theme; same-origin API calls under `/api/*`.
+- **Auth**: Google Sign-In; the ID token is re-verified server-side with `jose`.
+- **Backend**: AWS Lambda (Node 20, arm64) + API Gateway v2; data in DynamoDB
+  (single table + `GSI1`).
+- **Group isolation**: a server-side membership check gates every
+  group-scoped request.
+- **Hosting**: S3 + CloudFront. **Deploy**: GitHub Actions via OIDC.
 
-## 2. AWS bootstrap (AWS CloudShell — a terminal in the browser)
+## Commands
 
-1. Sign in to the **AWS Console**, top-right region **N. Virginia
-   (us-east-1)**.
-2. Click the **CloudShell** icon in the top toolbar (a `>_` prompt).
-3. Paste and run (swap in your Client ID):
+- `npm run dev` — Vite dev server
+- `npm run build` — type-check + build to `dist/`
+- `npm run lint` — ESLint
+- `npm run test:run` — frontend tests
+- `cd backend && npm test` — backend tests
 
-   ```bash
-   git clone -b claude/root-maze https://github.com/differentmatt/root-maze
-   cd root-maze
-   GOOGLE_CLIENT_ID=YOUR_ID.apps.googleusercontent.com bash scripts/setup.sh
-   ```
+## Deployment
 
-   > If this is a **fresh AWS account** with no GitHub OIDC provider yet,
-   > add `CREATE_OIDC=true` before `bash`. (If you also run log-doom in this
-   > account, leave it off — the provider already exists.)
+Branch-routed by GitHub Actions:
 
-4. When it finishes it prints a block with **role ARNs** and **your two
-   URLs**. Keep that open for the next section.
-5. Back in the **Google Console** (step 1.3), edit the OAuth client and add
-   both printed URLs as **Authorized JavaScript origins**:
-   - `https://<something>.cloudfront.net` (staging)
-   - `https://<something>.cloudfront.net` (prod)
+- push to any non-`main` branch → **staging** (`root-maze-staging`)
+- merge to `main` → **prod** (`root-maze-prod`)
 
-## 3. GitHub secrets (GitHub mobile app or github.com)
+Both stacks come from one template, `infra/template.yaml`.
 
-Repo → **Settings → Secrets and variables → Actions**:
+### First-time infrastructure
 
-- **Secrets** tab → New repository secret:
-  - `AWS_DEPLOY_ROLE_STAGING` = the staging role ARN from step 2.4
-  - `AWS_DEPLOY_ROLE_PROD` = the prod role ARN from step 2.4
-- **Variables** tab → New repository variable:
-  - `VITE_GOOGLE_CLIENT_ID` = your Google Client ID
+`scripts/setup.sh` provisions both stacks. Run it once against the target AWS
+account (any environment with AWS credentials, e.g. AWS CloudShell):
 
----
+```bash
+GOOGLE_CLIENT_ID=<oauth-web-client-id> bash scripts/setup.sh
+```
 
-## The loop, from now on
+It prints the deploy-role ARNs and the site URLs. Then, in the GitHub repo
+(Settings → Secrets and variables → Actions):
 
-- I push to **`claude/root-maze`** → GitHub Actions deploys to the **staging**
-  URL. Open it on your phone, sign in, tap **Create group**, reload → *"You're
-  in group: …"*.
-- Happy? In the GitHub app, **merge** the branch into `main` → Actions deploys
-  the same thing to the **prod** URL.
+- Secrets: `AWS_DEPLOY_ROLE_STAGING`, `AWS_DEPLOY_ROLE_PROD`
+- Variable: `VITE_GOOGLE_CLIENT_ID`
 
-Watch a run under the repo's **Actions** tab. The final log line prints the
-deployed URL.
+Add each site URL as an Authorized JavaScript origin on the Google OAuth
+client. Subsequent pushes deploy automatically.
 
-## Later phases
+## Architecture, schema, and key files
 
-Phase 1 adds `person_node` / `edge` handlers and the graph UI. The schema and
-group-isolation checks are already in place for it — see `CLAUDE.md`.
+See [`CLAUDE.md`](./CLAUDE.md).
