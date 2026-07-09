@@ -168,3 +168,109 @@ export function deleteEdge(
     `/groups/${groupId}/edges/${edgeId}`,
   )
 }
+
+// --- Phase 2: membership + invites ---
+
+export type Role = 'owner' | 'editor'
+
+export interface Member {
+  accountId: string
+  role: Role
+  email: string | null
+  name: string | null
+  joinedAt: string
+}
+
+export interface MembersResult {
+  members: Member[]
+  me: string
+}
+
+export interface Invite {
+  token: string
+  groupId: string
+  role: Role
+  expiresAt: string
+  maxUses: number | null
+  useCount: number
+  createdAt: string
+  createdBy: string
+}
+
+export interface CreateInviteInput {
+  expiresInDays?: number
+  maxUses?: number | null
+}
+
+// What an unauthenticated invitee sees before signing in.
+export interface InvitePreview {
+  valid: boolean
+  groupName?: string
+}
+
+export function getMembers(groupId: string): Promise<MembersResult> {
+  return request<MembersResult>('GET', `/groups/${groupId}/members`)
+}
+
+export function removeMember(
+  groupId: string,
+  accountId: string,
+): Promise<{ removed: boolean }> {
+  return request<{ removed: boolean }>(
+    'DELETE',
+    `/groups/${groupId}/members/${accountId}`,
+  )
+}
+
+export function changeMemberRole(
+  groupId: string,
+  accountId: string,
+  role: Role,
+): Promise<{ accountId: string; role: Role }> {
+  return request<{ accountId: string; role: Role }>(
+    'PATCH',
+    `/groups/${groupId}/members/${accountId}`,
+    { role },
+  )
+}
+
+export function getInvites(groupId: string): Promise<{ invites: Invite[] }> {
+  return request<{ invites: Invite[] }>('GET', `/groups/${groupId}/invites`)
+}
+
+export function createInvite(
+  groupId: string,
+  input: CreateInviteInput = {},
+): Promise<Invite> {
+  return request<Invite>('POST', `/groups/${groupId}/invites`, input)
+}
+
+export function revokeInvite(
+  groupId: string,
+  token: string,
+): Promise<{ revoked: boolean }> {
+  return request<{ revoked: boolean }>(
+    'DELETE',
+    `/groups/${groupId}/invites/${encodeURIComponent(token)}`,
+  )
+}
+
+// Public preview — no auth required (the wrapper simply omits the Bearer header
+// when there's no credential).
+export function previewInvite(token: string): Promise<InvitePreview> {
+  return request<InvitePreview>('GET', `/invites/${encodeURIComponent(token)}`)
+}
+
+export function acceptInvite(
+  token: string,
+): Promise<{ groupId: string; name: string; role: Role }> {
+  return request<{ groupId: string; name: string; role: Role }>(
+    'POST',
+    `/invites/${encodeURIComponent(token)}/accept`,
+  )
+}
+
+// Build a shareable invite URL from a token, pointing at this app's origin.
+export function inviteUrl(token: string): string {
+  return `${window.location.origin}/?invite=${encodeURIComponent(token)}`
+}

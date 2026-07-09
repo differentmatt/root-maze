@@ -12,12 +12,25 @@ Stack and cloud approach are deliberately reused from the `log-doom` repo.
 shows either "create a group" or "you're in group X". This exercised auth +
 group membership + DynamoDB + deploy end-to-end.
 
-**Phase 1 (current): people + relationships.** `person_node` and `edge`
+**Phase 1 (done): people + relationships.** `person_node` and `edge`
 (`edgeKind: parent_child | partner`) handlers, gated by the same
 `requireMember` group-isolation check, plus a minimal force-directed graph UI
 to add and view people and relationships. Soft-delete, `updatedAt`/`updatedBy`,
 and the nullable `accountId` on nodes are all preserved; deleting a person
 cascade-soft-deletes the edges that touch it.
+
+**Phase 2 (current): membership & invites.** A group can now have more than its
+creator. Members are `owner` or `editor` (a group always keeps ≥1 owner — the
+last owner can't be removed or demoted). Sharing is via **invite links**: a
+member mints an `INVITE#<token>` item (256-bit CSPRNG token, default 7-day
+expiry, multi-use with an optional max-use cap, revocable via soft-delete). The
+token also carries GSI1 keys (`GSI1PK=INVITE#<token>`) so a bare token resolves
+to its group without leaking the `groupId` in the link. An unauthenticated
+invitee sees only the group name (`GET /api/invites/{token}`); accepting
+requires signing in and always grants `editor` (never owner). Any member may
+manage membership and invites — deliberately low-friction for a casual family
+app. Every write keeps soft-delete, `updatedAt`/`updatedBy`, and the append-only
+edit log.
 
 ## Commands
 
@@ -55,7 +68,8 @@ cascade-soft-deletes the edges that touch it.
 | Account       | `ACCOUNT#<accountId>` | `META`            | accountId is our ULID |
 | Google link   | `AUTH#GOOGLE#<sub>`   | `META`            | `{ accountId }` |
 | Group         | `GROUP#<groupId>`     | `META`            | soft-delete via `deletedAt` |
-| Membership    | `GROUP#<groupId>`     | `MEMBER#<acct>`   | `role`; `GSI1PK=ACCOUNT#<acct>`, `GSI1SK=GROUP#<groupId>` |
+| Membership    | `GROUP#<groupId>`     | `MEMBER#<acct>`   | `role: owner \| editor`; `GSI1PK=ACCOUNT#<acct>`, `GSI1SK=GROUP#<groupId>` |
+| invite        | `GROUP#<groupId>`     | `INVITE#<token>`  | `role`, `expiresAt`, `maxUses`, `useCount`; `GSI1PK=INVITE#<token>`, `GSI1SK=GROUP#<groupId>` (token → group) |
 | person_node   | `GROUP#<groupId>`     | `NODE#<nodeId>`   | nullable `accountId` (later identity linking) |
 | edge          | `GROUP#<groupId>`     | `EDGE#<edgeId>`   | `edgeKind: parent_child \| partner` |
 | edit_log      | `GROUP#<groupId>`     | `LOG#<ulid>`      | append-only, never mutated |
@@ -65,14 +79,24 @@ All mutable rows carry `updatedAt` / `updatedBy` and soft-delete `deletedAt`.
 `GET /api/groups/{groupId}/graph`, writes via `POST/PATCH/DELETE` on
 `.../nodes[/{nodeId}]` and `.../edges[/{edgeId}]`.
 
+Phase 2 membership & invite routes:
+`GET/DELETE/PATCH /api/groups/{groupId}/members[/{accountId}]`,
+`GET/POST /api/groups/{groupId}/invites`,
+`DELETE /api/groups/{groupId}/invites/{token}`, and the token-addressed
+`GET /api/invites/{token}` (public preview) + `POST /api/invites/{token}/accept`.
+
 ## Key files
 
-- `src/App.tsx` — sign-in → group state → tree workspace
+- `src/App.tsx` — sign-in → group state → tree/members workspace; also the
+  `/?invite=<token>` join route
 - `src/tree/` — `TreeView` (group screen), `GraphCanvas` + `layout` (SVG graph)
+- `src/members/` — `MembersPanel` (members + invite links), `JoinScreen` (accept)
 - `src/auth.ts`, `src/api.ts` — client auth state + fetch wrapper
-- `backend/lib/` — `auth`, `dynamo`, `accounts`, `groups`, `nodes`, `edges`,
-  `graph`, `http` (auth+membership gate), `ids`, `errors`, `response`
-- `backend/handlers/` — `me`, `groups`, `graph`, `nodes`, `edges`
+- `backend/lib/` — `auth`, `dynamo`, `accounts`, `groups` (incl. membership
+  management), `invites`, `nodes`, `edges`, `graph`, `http` (auth+membership
+  gate), `ids`, `errors`, `response`
+- `backend/handlers/` — `me`, `groups`, `graph`, `nodes`, `edges`, `members`,
+  `invites`
 - `infra/template.yaml` — one CloudFormation template, two stacks
 - `scripts/setup.sh` — one-time bootstrap (run in AWS CloudShell)
 - `.github/workflows/deploy.yml` — branch-routed deploy

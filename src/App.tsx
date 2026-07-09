@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import AuthButton from './components/AuthButton'
 import {
   getCredential,
@@ -8,6 +8,8 @@ import {
 } from './auth'
 import { getMe, createGroup, ApiError, type Me, type Group } from './api'
 import TreeView from './tree/TreeView'
+import MembersPanel from './members/MembersPanel'
+import JoinScreen from './members/JoinScreen'
 
 type Load =
   | { status: 'idle' }
@@ -21,6 +23,10 @@ export default function App() {
   const [name, setName] = useState('')
   const [creating, setCreating] = useState(false)
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
+
+  // An invite link is /?invite=<token>. When present, the join flow takes over
+  // the whole screen for both signed-out and signed-in visitors.
+  const inviteToken = new URLSearchParams(window.location.search).get('invite')
 
   // Track sign-in/out.
   useEffect(() => onCredentialChange(setCred), [])
@@ -60,6 +66,10 @@ export default function App() {
     } finally {
       setCreating(false)
     }
+  }
+
+  if (inviteToken) {
+    return <JoinScreen token={inviteToken} signedIn={!!credential} />
   }
 
   return (
@@ -145,6 +155,7 @@ function GroupWorkspace({
 }) {
   const active =
     groups.find((g) => g.groupId === activeGroupId) ?? groups[0]
+  const [tab, setTab] = useState<'tree' | 'members'>('tree')
 
   return (
     <div className="flex flex-col gap-4">
@@ -161,7 +172,42 @@ function GroupWorkspace({
           ))}
         </select>
       )}
-      <TreeView group={active} />
+
+      <div className="flex gap-1 rounded-md border border-zinc-800 bg-zinc-900 p-1 text-sm">
+        <TabButton active={tab === 'tree'} onClick={() => setTab('tree')}>
+          Tree
+        </TabButton>
+        <TabButton active={tab === 'members'} onClick={() => setTab('members')}>
+          Members
+        </TabButton>
+      </div>
+
+      {tab === 'tree' ? (
+        <TreeView group={active} />
+      ) : (
+        <MembersPanel key={active.groupId} group={active} />
+      )}
     </div>
+  )
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex-1 rounded px-3 py-1.5 font-medium transition-colors ${
+        active ? 'bg-zinc-100 text-zinc-900' : 'text-zinc-400 hover:text-zinc-200'
+      }`}
+    >
+      {children}
+    </button>
   )
 }
