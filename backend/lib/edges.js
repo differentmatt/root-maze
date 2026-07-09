@@ -19,12 +19,12 @@ export const EDGE_KINDS = ['parent_child', 'partner']
 
 export const SUBTYPES = {
   parent_child: ['biological', 'step', 'adoptive', 'foster'],
-  partner: ['married', 'remarried', 'dating', 'ex', 'unspecified'],
+  partner: ['partner', 'married', 'remarried', 'ex'],
 }
 
 export const DEFAULT_SUBTYPE = {
   parent_child: 'biological',
-  partner: 'unspecified',
+  partner: 'partner',
 }
 
 function edgeKey(groupId, edgeId) {

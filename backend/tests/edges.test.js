@@ -38,7 +38,7 @@ describe('subtype validation', () => {
 
   it('defaults an empty subtype per kind', () => {
     expect(resolveSubtype('parent_child', undefined)).toBe('biological')
-    expect(resolveSubtype('partner', '')).toBe('unspecified')
+    expect(resolveSubtype('partner', '')).toBe('partner')
   })
 
   it('rejects an unknown subtype for the kind', () => {

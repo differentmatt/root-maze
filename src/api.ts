@@ -98,7 +98,7 @@ export interface Graph {
 // the default the server falls back to when none is supplied.
 export const SUBTYPES: Record<EdgeKind, string[]> = {
   parent_child: ['biological', 'step', 'adoptive', 'foster'],
-  partner: ['unspecified', 'married', 'remarried', 'dating', 'ex'],
+  partner: ['partner', 'married', 'remarried', 'ex'],
 }
 
 export interface NodeInput {
