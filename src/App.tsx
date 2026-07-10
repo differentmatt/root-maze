@@ -70,15 +70,20 @@ export default function App() {
 
   return (
     <main className="mx-auto flex min-h-full max-w-md flex-col gap-6 px-5 py-10">
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight">{APP_TITLE}</h1>
         {credential && (
-          <button
-            onClick={clearCredential}
-            className="text-sm text-zinc-400 hover:text-zinc-200"
-          >
-            Sign out
-          </button>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="max-w-[8.5rem] truncate text-xs text-zinc-500">
+              {decodeEmail(credential) ?? 'your account'}
+            </span>
+            <button
+              onClick={clearCredential}
+              className="shrink-0 text-sm text-zinc-400 hover:text-zinc-200"
+            >
+              Sign out
+            </button>
+          </div>
         )}
       </header>
 
@@ -91,10 +96,6 @@ export default function App() {
 
       {credential && (
         <section className="flex flex-col gap-4">
-          <p className="text-sm text-zinc-500">
-            Signed in as {decodeEmail(credential) ?? 'your account'}
-          </p>
-
           {load.status === 'loading' && (
             <p className="text-zinc-400">Loading…</p>
           )}
@@ -147,27 +148,38 @@ function GroupWorkspace({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Group switcher (only meaningful with more than one) plus a way to
-          start another group you own — the backend has always allowed it. */}
+      {/* Group switcher (only meaningful with more than one) plus a compact way
+          to start another group you own — the backend has always allowed it. */}
       <div className="flex items-center gap-2">
         {groups.length > 1 && (
-          <select
-            value={active.groupId}
-            onChange={(e) => onSelect(e.target.value)}
-            className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
-          >
-            {groups.map((g) => (
-              <option key={g.groupId} value={g.groupId}>
-                {g.name}
-              </option>
-            ))}
-          </select>
+          <div className="relative min-w-0 flex-1">
+            <select
+              aria-label="Switch group"
+              value={active.groupId}
+              onChange={(e) => onSelect(e.target.value)}
+              className="w-full appearance-none rounded-md border border-zinc-700 bg-zinc-950 py-2 pl-3 pr-9 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+            >
+              {groups.map((g) => (
+                <option key={g.groupId} value={g.groupId}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+            <span
+              aria-hidden
+              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400"
+            >
+              ▼
+            </span>
+          </div>
         )}
         <button
           onClick={() => setCreatingGroup((v) => !v)}
-          className="ml-auto shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
+          aria-label={creatingGroup ? 'Cancel new group' : 'New group'}
+          title={creatingGroup ? 'Cancel' : 'New group'}
+          className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-700 text-lg text-zinc-300 hover:bg-zinc-800"
         >
-          {creatingGroup ? 'Cancel' : 'New group'}
+          {creatingGroup ? '×' : '+'}
         </button>
       </div>
 

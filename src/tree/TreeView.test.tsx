@@ -147,6 +147,34 @@ describe('TreeView', () => {
     )
   })
 
+  it('hides "This is me" when the caller is already linked elsewhere', async () => {
+    vi.mocked(getGraph).mockResolvedValue(graph)
+    // The caller is already linked to Bo, so Ada must not offer "This is me".
+    vi.mocked(getMembers).mockResolvedValue({
+      members: [
+        {
+          accountId: 'acc_1',
+          role: 'owner',
+          email: 'a@b.com',
+          name: 'Ann',
+          joinedAt: 't',
+          linkedNodeId: 'nod_b',
+          linkedNodeName: 'Bo',
+        },
+      ],
+      me: 'acc_1',
+    })
+    render(<TreeView group={group} />)
+
+    await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Ada'))
+
+    expect(
+      screen.queryByRole('button', { name: 'This is me' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText(/Unlink there first/)).toBeInTheDocument()
+  })
+
   it('requires confirmation before deleting a person', async () => {
     vi.mocked(getGraph).mockResolvedValue(graph)
     vi.mocked(deleteNode).mockResolvedValue({ deleted: true })

@@ -201,8 +201,14 @@ function ClaimSelf({
         <button
           onClick={claim}
           disabled={busy || !nodeId}
-          className="rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40"
         >
+          {busy && (
+            <span
+              aria-hidden
+              className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-900/60 border-t-transparent"
+            />
+          )}
           {busy ? 'Linking…' : "That's me"}
         </button>
         <button

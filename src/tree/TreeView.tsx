@@ -553,6 +553,19 @@ function SaveStatus({ save }: { save: SaveState }) {
   return null
 }
 
+// Small inline spinner for in-progress buttons. `dark` flips it for use on a
+// light (primary) button; otherwise it inherits the current text color.
+function Spinner({ dark }: { dark?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-t-transparent ${
+        dark ? 'border-zinc-900/60' : 'border-current'
+      }`}
+    />
+  )
+}
+
 // Labelled field — the native date picker ignores placeholder text, so a label
 // is the only reliable way to say what each input is.
 function Field({
@@ -633,9 +646,10 @@ function LinkSection({
             <button
               onClick={() => run(() => unlinkPersonNode(groupId, linkedAccountId))}
               disabled={busy}
-              className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
             >
-              Unlink
+              {busy && <Spinner />}
+              {busy ? 'Unlinking…' : 'Unlink'}
             </button>
           )}
         </div>
@@ -643,17 +657,23 @@ function LinkSection({
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm text-zinc-400">No one has claimed this person yet.</p>
-            <button
-              onClick={() => run(() => linkPersonNode(groupId, me, person.nodeId))}
-              disabled={busy}
-              className={primaryBtn}
-            >
-              {busy ? 'Linking…' : 'This is me'}
-            </button>
+            {/* Only offer "This is me" to a caller who hasn't claimed anyone yet;
+                once linked, they unlink from their own node before re-claiming. */}
+            {!myNodeId && (
+              <button
+                onClick={() => run(() => linkPersonNode(groupId, me, person.nodeId))}
+                disabled={busy}
+                className={`flex items-center gap-1.5 ${primaryBtn}`}
+              >
+                {busy && <Spinner dark />}
+                {busy ? 'Linking…' : 'This is me'}
+              </button>
+            )}
           </div>
           {myNodeId && myNodeId !== person.nodeId && (
             <p className="text-xs text-zinc-500">
-              You're currently linked to someone else — this moves your link here.
+              You're linked to someone else. Unlink there first to claim this
+              person.
             </p>
           )}
         </div>
