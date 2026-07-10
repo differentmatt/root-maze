@@ -92,12 +92,16 @@ jobs:
           echo "graph_fn=$(get GraphFunctionName)"  >> "$GITHUB_OUTPUT"
           echo "nodes_fn=$(get NodesFunctionName)"  >> "$GITHUB_OUTPUT"
           echo "edges_fn=$(get EdgesFunctionName)"  >> "$GITHUB_OUTPUT"
+          echo "members_fn=$(get MembersFunctionName)" >> "$GITHUB_OUTPUT"
+          echo "invites_fn=$(get InvitesFunctionName)" >> "$GITHUB_OUTPUT"
 
       # --- Frontend build + upload ---
       - name: Build frontend
         run: npm run build
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          # Drives the "(staging)" suffix on the app title (staging | prod).
+          VITE_APP_ENV: ${{ steps.env.outputs.name }}
 
       - name: Upload to S3
         run: |
@@ -121,7 +125,9 @@ jobs:
             ${{ steps.out.outputs.groups_fn }} \
             ${{ steps.out.outputs.graph_fn }} \
             ${{ steps.out.outputs.nodes_fn }} \
-            ${{ steps.out.outputs.edges_fn }}; do
+            ${{ steps.out.outputs.edges_fn }} \
+            ${{ steps.out.outputs.members_fn }} \
+            ${{ steps.out.outputs.invites_fn }}; do
             aws lambda update-function-code \
               --function-name "$FN" \
               --zip-file fileb://backend.zip >/dev/null
