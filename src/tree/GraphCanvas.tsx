@@ -3,11 +3,17 @@ import type { PersonNode, Edge } from '../api'
 import { computeLayout } from './layout'
 import { labelFor } from './names'
 
+// The SVG's own coordinate viewport. It stays fixed so the on-screen element
+// keeps a stable size; the whole tree is fit into it via the pan/zoom
+// transform, however big the graph gets.
 const WIDTH = 600
 const HEIGHT = 460
-const MIN_K = 0.4
+// Zoom-out floor low enough to fit a hundred-plus-person tree on screen.
+const MIN_K = 0.05
 const MAX_K = 4
 const NODE_R = 18
+// Padding (in viewport units) around the tree when fit into view.
+const FIT_PAD = 32
 
 interface View {
   x: number
@@ -65,17 +71,41 @@ export default function GraphCanvas({
     [nodes, edges],
   )
 
-  const pos = useMemo(
+  const layout = useMemo(
     () =>
       computeLayout(
         nodes.map((n) => n.nodeId),
-        edges.map((e) => ({ from: e.fromPerson, to: e.toPerson })),
-        WIDTH,
-        HEIGHT,
+        edges.map((e) => ({
+          from: e.fromPerson,
+          to: e.toPerson,
+          kind: e.edgeKind,
+        })),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [layoutKey],
   )
+  const pos = layout.pos
+
+  // The view (pan/zoom) that fits the whole tree centered in the viewport.
+  const fitView = useCallback((): View => {
+    const cw = layout.width
+    const ch = layout.height
+    if (cw <= 0 || ch <= 0) return { x: 0, y: 0, k: 1 }
+    const k = Math.min(
+      MAX_K,
+      Math.max(
+        MIN_K,
+        Math.min((WIDTH - 2 * FIT_PAD) / cw, (HEIGHT - 2 * FIT_PAD) / ch),
+      ),
+    )
+    return { k, x: (WIDTH - k * cw) / 2, y: (HEIGHT - k * ch) / 2 }
+  }, [layout.width, layout.height])
+
+  // Fit the tree in view whenever its shape (and thus layout) changes, so the
+  // user lands on the whole family without having to zoom out by hand.
+  useEffect(() => {
+    setView(fitView())
+  }, [fitView])
 
   // Map client (screen) coordinates to SVG user space via the <svg>'s own CTM,
   // which is independent of our pan/zoom transform — so deltas stay stable.
@@ -314,10 +344,7 @@ export default function GraphCanvas({
       </svg>
 
       <div className="absolute right-2 top-2 flex flex-col gap-1">
-        <ControlButton
-          label="Reset view"
-          onClick={() => setView({ x: 0, y: 0, k: 1 })}
-        >
+        <ControlButton label="Fit to view" onClick={() => setView(fitView())}>
           ⌾
         </ControlButton>
         <ControlButton
