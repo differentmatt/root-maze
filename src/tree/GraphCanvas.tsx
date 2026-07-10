@@ -56,6 +56,7 @@ export default function GraphCanvas({
   const svgRef = useRef<SVGSVGElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 })
   const [mode, setMode] = useState<ViewMode>('tree')
+  const [showHelp, setShowHelp] = useState(false)
   // Who the focus view centers on. Null until the user picks someone (or has a
   // claimed "me" node), at which point it defaults sensibly below.
   const [focusId, setFocusId] = useState<string | null>(null)
@@ -474,24 +475,52 @@ export default function GraphCanvas({
       </svg>
 
       <div className="absolute left-2 top-2 flex flex-col items-start gap-1">
-        <div
-          role="group"
-          aria-label="Graph view"
-          className="flex overflow-hidden rounded-md border border-zinc-700 bg-zinc-900/90 text-xs"
-        >
-          <ModeButton active={mode === 'tree'} onClick={() => setMode('tree')}>
-            Whole tree
-          </ModeButton>
-          <ModeButton active={mode === 'focus'} onClick={enterFocus}>
-            Focus
-          </ModeButton>
+        <div className="flex items-center gap-1">
+          <div
+            role="group"
+            aria-label="Graph view"
+            className="flex overflow-hidden rounded-md border border-zinc-700 bg-zinc-900/90 text-xs"
+          >
+            <ModeButton active={mode === 'tree'} onClick={() => setMode('tree')}>
+              Whole tree
+            </ModeButton>
+            <ModeButton active={mode === 'focus'} onClick={enterFocus}>
+              Focus
+            </ModeButton>
+          </div>
+          <button
+            type="button"
+            aria-label="About the views"
+            aria-expanded={showHelp}
+            onClick={() => setShowHelp((v) => !v)}
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900/90 text-xs text-zinc-300 hover:bg-zinc-800"
+          >
+            ?
+          </button>
         </div>
-        {mode === 'focus' && (
-          <p className="max-w-[12rem] rounded bg-zinc-900/90 px-1.5 py-0.5 text-[11px] text-zinc-400">
-            {focusName
-              ? `Around ${focusName} · tap a relative to recenter`
-              : 'Pick someone to center on'}
-          </p>
+        {showHelp ? (
+          <div className="max-w-[15rem] space-y-1 rounded-md border border-zinc-700 bg-zinc-900/95 p-2 text-[11px] leading-snug text-zinc-300">
+            <p>
+              <span className="font-medium text-zinc-100">Whole tree</span> —
+              everyone, laid out by generation.
+            </p>
+            <p>
+              <span className="font-medium text-zinc-100">Focus</span> — zoom in
+              on one person and their close family. Tap anyone to re-center on
+              them.
+            </p>
+            <p className="text-zinc-500">
+              Drag to pan · pinch or scroll to zoom · ⌾ re-fits.
+            </p>
+          </div>
+        ) : (
+          mode === 'focus' && (
+            <p className="max-w-[12rem] rounded bg-zinc-900/90 px-1.5 py-0.5 text-[11px] text-zinc-400">
+              {focusName
+                ? `Around ${focusName} · tap a relative to re-center`
+                : 'Pick someone to center on'}
+            </p>
+          )
         )}
       </div>
 

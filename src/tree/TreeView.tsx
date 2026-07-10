@@ -214,6 +214,10 @@ function Legend() {
         you
       </span>
       <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-3 rounded-full border-2 border-amber-400" />{' '}
+        focused on
+      </span>
+      <span className="flex items-center gap-1.5">
         <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" /> claimed by a
         member
       </span>
