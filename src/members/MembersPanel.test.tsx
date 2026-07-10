@@ -173,7 +173,8 @@ describe('MembersPanel', () => {
     await waitFor(() => expect(screen.getByText('Ann')).toBeInTheDocument())
 
     const picker = screen.getByLabelText('Linked person for Ann')
-    fireEvent.change(picker, { target: { value: 'nod_1' } })
+    fireEvent.click(picker)
+    fireEvent.click(await screen.findByText('Ann Lott'))
     await waitFor(() =>
       expect(linkPersonNode).toHaveBeenCalledWith('grp_1', 'acc_1', 'nod_1'),
     )
@@ -205,7 +206,8 @@ describe('MembersPanel', () => {
     await waitFor(() => expect(screen.getByText('Ann')).toBeInTheDocument())
 
     const picker = screen.getByLabelText('Linked person for Ann')
-    fireEvent.change(picker, { target: { value: '' } })
+    fireEvent.click(picker)
+    fireEvent.click(await screen.findByText('— not linked —'))
     await waitFor(() =>
       expect(unlinkPersonNode).toHaveBeenCalledWith('grp_1', 'acc_1'),
     )

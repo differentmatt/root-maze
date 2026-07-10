@@ -6,7 +6,14 @@ import {
   clearCredential,
   decodeEmail,
 } from './auth'
-import { getMe, createGroup, ApiError, type Me, type Group } from './api'
+import {
+  getMe,
+  createGroup,
+  renameGroup,
+  ApiError,
+  type Me,
+  type Group,
+} from './api'
 import TreeView from './tree/TreeView'
 import MembersPanel from './members/MembersPanel'
 import JoinScreen from './members/JoinScreen'
@@ -64,6 +71,18 @@ export default function App() {
     }
   }
 
+  // Re-fetch /me after a group change (e.g. a rename) so the switcher and titles
+  // pick up the new name, without disturbing the active selection.
+  async function refreshMe() {
+    try {
+      const me = await getMe()
+      setLoad({ status: 'ready', me })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Refresh failed'
+      setLoad({ status: 'error', message })
+    }
+  }
+
   if (inviteToken) {
     return <JoinScreen token={inviteToken} signedIn={!!credential} />
   }
@@ -110,6 +129,7 @@ export default function App() {
               activeGroupId={activeGroupId}
               onSelect={setActiveGroupId}
               onCreated={handleCreated}
+              onRenamed={refreshMe}
             />
           )}
 
@@ -127,93 +147,200 @@ export default function App() {
   )
 }
 
-// Once the caller is in at least one group, this is the workspace: an optional
-// switcher (only when they belong to more than one group) over the Phase 1
-// tree view. A person can belong to multiple groups, each an isolated graph.
+// Once the caller is in at least one group, this is the workspace. Two tabs:
+// "Group" (switch between groups, rename, start a new one, and manage members)
+// and "Tree" (the Phase 1 graph). Group leads because that's where you pick
+// which family you're looking at. A person can belong to multiple groups, each
+// an isolated graph.
 function GroupWorkspace({
   groups,
   activeGroupId,
   onSelect,
   onCreated,
+  onRenamed,
 }: {
   groups: Group[]
   activeGroupId: string | null
   onSelect: (groupId: string) => void
   onCreated: (group: Group) => Promise<void> | void
+  onRenamed: () => Promise<void> | void
 }) {
   const active =
     groups.find((g) => g.groupId === activeGroupId) ?? groups[0]
-  const [tab, setTab] = useState<'tree' | 'members'>('tree')
-  const [creatingGroup, setCreatingGroup] = useState(false)
+  const [tab, setTab] = useState<'group' | 'tree'>('group')
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Group switcher (only meaningful with more than one) plus a compact way
-          to start another group you own — the backend has always allowed it. */}
-      <div className="flex items-center gap-2">
-        {groups.length > 1 ? (
-          <div className="relative min-w-0 flex-1">
-            <select
-              aria-label="Switch group"
-              value={active.groupId}
-              onChange={(e) => onSelect(e.target.value)}
-              className="w-full appearance-none rounded-md border border-zinc-700 bg-zinc-950 py-2 pl-3 pr-9 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
-            >
-              {groups.map((g) => (
-                <option key={g.groupId} value={g.groupId}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
-            <span
-              aria-hidden
-              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400"
-            >
-              ▼
-            </span>
-          </div>
-        ) : (
-          // With a single group there's nothing to switch, so just name it.
-          <p className="min-w-0 flex-1 truncate text-lg font-medium">
-            {active.name}
-          </p>
-        )}
-        <button
-          onClick={() => setCreatingGroup((v) => !v)}
-          aria-label={creatingGroup ? 'Cancel new group' : 'New group'}
-          title={creatingGroup ? 'Cancel' : 'New group'}
-          className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-zinc-700 text-lg text-zinc-300 hover:bg-zinc-800"
-        >
-          {creatingGroup ? '×' : '+'}
-        </button>
-      </div>
-
-      {creatingGroup && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-          <CreateGroupForm
-            onCreated={async (group) => {
-              setCreatingGroup(false)
-              await onCreated(group)
-            }}
-          />
-        </div>
-      )}
+      <p className="truncate text-lg font-medium">{active.name}</p>
 
       <div className="flex gap-1 rounded-md border border-zinc-800 bg-zinc-900 p-1 text-sm">
+        <TabButton active={tab === 'group'} onClick={() => setTab('group')}>
+          Group
+        </TabButton>
         <TabButton active={tab === 'tree'} onClick={() => setTab('tree')}>
           Tree
         </TabButton>
-        <TabButton active={tab === 'members'} onClick={() => setTab('members')}>
-          Members
-        </TabButton>
       </div>
 
-      {tab === 'tree' ? (
-        <TreeView group={active} />
+      {tab === 'group' ? (
+        <GroupPanel
+          key={active.groupId}
+          groups={groups}
+          active={active}
+          onSelect={onSelect}
+          onCreated={onCreated}
+          onRenamed={onRenamed}
+        />
       ) : (
-        <MembersPanel key={active.groupId} group={active} />
+        <TreeView group={active} />
       )}
     </div>
+  )
+}
+
+// The "Group" tab: pick which group you're in, rename it, start a new one, then
+// manage its members and invites (the old Members panel, now nested here).
+function GroupPanel({
+  groups,
+  active,
+  onSelect,
+  onCreated,
+  onRenamed,
+}: {
+  groups: Group[]
+  active: Group
+  onSelect: (groupId: string) => void
+  onCreated: (group: Group) => Promise<void> | void
+  onRenamed: () => Promise<void> | void
+}) {
+  const [creatingGroup, setCreatingGroup] = useState(false)
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section className="flex flex-col gap-3">
+        {groups.length > 1 && (
+          <label className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Current group
+            <div className="relative">
+              <select
+                aria-label="Switch group"
+                value={active.groupId}
+                onChange={(e) => onSelect(e.target.value)}
+                className="w-full appearance-none rounded-md border border-zinc-700 bg-zinc-950 py-2 pl-3 pr-9 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+              >
+                {groups.map((g) => (
+                  <option key={g.groupId} value={g.groupId}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+              <span
+                aria-hidden
+                className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400"
+              >
+                ▼
+              </span>
+            </div>
+          </label>
+        )}
+
+        <RenameGroupForm group={active} onRenamed={onRenamed} />
+
+        {!creatingGroup ? (
+          <button
+            onClick={() => setCreatingGroup(true)}
+            className="self-start text-sm text-zinc-400 hover:text-zinc-200"
+          >
+            + New group
+          </button>
+        ) : (
+          <div className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-zinc-300">New group</p>
+              <button
+                onClick={() => setCreatingGroup(false)}
+                className="text-xs text-zinc-500 hover:text-zinc-300"
+              >
+                Cancel
+              </button>
+            </div>
+            <CreateGroupForm
+              onCreated={async (group) => {
+                setCreatingGroup(false)
+                await onCreated(group)
+              }}
+            />
+          </div>
+        )}
+      </section>
+
+      <div className="border-t border-zinc-800" />
+
+      <MembersPanel key={active.groupId} group={active} />
+    </div>
+  )
+}
+
+// Rename the active group. Any member may rename (enforced server-side); the
+// field seeds from the current name and saves on submit.
+function RenameGroupForm({
+  group,
+  onRenamed,
+}: {
+  group: Group
+  onRenamed: () => Promise<void> | void
+}) {
+  // Seeded fresh per group: GroupPanel is keyed on groupId, so switching groups
+  // remounts this form with the new name rather than needing a reseed effect.
+  const [name, setName] = useState(group.name)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+
+  const trimmed = name.trim()
+  const dirty = trimmed !== group.name && trimmed.length > 0
+
+  async function submit() {
+    if (!dirty) return
+    setSaving(true)
+    setError('')
+    setSaved(false)
+    try {
+      await renameGroup(group.groupId, trimmed)
+      await onRenamed()
+      setSaved(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Rename failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <label className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+      Group name
+      <div className="flex gap-2">
+        <input
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value)
+            setSaved(false)
+          }}
+          className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+        />
+        <button
+          onClick={submit}
+          disabled={saving || !dirty}
+          className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+        >
+          {saving ? 'Saving…' : 'Rename'}
+        </button>
+      </div>
+      {error && <p className="text-xs normal-case text-red-400">{error}</p>}
+      {saved && !dirty && (
+        <p className="text-xs normal-case text-emerald-500">Group renamed</p>
+      )}
+    </label>
   )
 }
 

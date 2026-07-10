@@ -84,6 +84,28 @@ export async function createGroup(accountId, name) {
   return { groupId, name, role: 'owner' }
 }
 
+// Rename a group. Any member may rename (membership management is deliberately
+// low-friction for a casual family app); the group META name is patched in place
+// with a fresh updatedAt/updatedBy and the change is appended to the edit log.
+// Returns 'not_found' if there's no live group, otherwise the updated summary.
+export async function renameGroup(groupId, actorAccountId, name) {
+  const trimmed = typeof name === 'string' ? name.trim() : ''
+  if (!trimmed) throw new ValidationError('Missing group name')
+  if (trimmed.length > 100) throw new ValidationError('Group name too long')
+
+  const meta = await getItem(groupMetaKey(groupId))
+  if (!meta || meta.deletedAt) return 'not_found'
+  if (meta.name === trimmed) return { groupId, name: trimmed }
+
+  const now = new Date().toISOString()
+  const before = { name: meta.name }
+  await putItem({ ...meta, name: trimmed, updatedAt: now, updatedBy: actorAccountId })
+  await appendLog(groupId, actorAccountId, 'update', 'group', groupId, before, {
+    name: trimmed,
+  })
+  return { groupId, name: trimmed }
+}
+
 // --- Phase 2: membership management ---
 //
 // Membership rows (GROUP#<id> / MEMBER#<acct>) already exist from Phase 0; here

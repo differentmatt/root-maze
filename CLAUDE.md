@@ -95,6 +95,12 @@ All mutable rows carry `updatedAt` / `updatedBy` and soft-delete `deletedAt`.
 `GET /api/groups/{groupId}/graph`, writes via `POST/PATCH/DELETE` on
 `.../nodes[/{nodeId}]` and `.../edges[/{edgeId}]`.
 
+Group create + rename routes (backed by the `groups` handler):
+`POST /api/groups` (create), `PATCH /api/groups/{groupId}` (rename — any member
+may rename; ≤100 chars). The workspace surfaces this under a "Group" tab (first,
+default) that also holds the group switcher, the "New group" affordance, and the
+members/invites panel.
+
 Phase 2 membership & invite routes:
 `GET/DELETE/PATCH /api/groups/{groupId}/members[/{accountId}]`,
 `GET/POST /api/groups/{groupId}/invites`,
@@ -108,11 +114,14 @@ member's `linkedNodeId`/`linkedNodeName`.
 
 ## Key files
 
-- `src/App.tsx` — sign-in → group state → tree/members workspace; also the
-  `/?invite=<token>` join route
-- `src/tree/` — `TreeView` (group screen), `GraphCanvas` + `layout` (SVG graph)
+- `src/App.tsx` — sign-in → group state → Group/Tree workspace (Group tab first:
+  switch, rename, new group, members); also the `/?invite=<token>` join route
+- `src/tree/` — `TreeView` (group screen), `GraphCanvas` + `layout` (SVG graph),
+  `siblings` + `suggestions` (derived relationships, incl. likely other parent)
 - `src/members/` — `MembersPanel` (members + invite links + who's-who linking),
   `JoinScreen` (accept + optional link-on-join)
+- `src/components/PersonPicker` — searchable person combobox (replaces long
+  `<select>` lists in the tree + members UIs)
 - `src/auth.ts`, `src/api.ts` — client auth state + fetch wrapper
 - `backend/lib/` — `auth`, `dynamo`, `accounts`, `groups` (incl. membership
   management), `invites`, `links` (identity linking), `nodes`, `edges`, `graph`,

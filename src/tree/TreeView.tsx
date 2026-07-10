@@ -20,7 +20,9 @@ import {
 } from '../api'
 import GraphCanvas from './GraphCanvas'
 import { inferSiblings, type InferredSibling } from './siblings'
+import { suggestOtherParents, type ParentSuggestion } from './suggestions'
 import { fullName, bornSuffix, namePartsOf } from './names'
+import PersonPicker from '../components/PersonPicker'
 
 type Status =
   | { state: 'loading' }
@@ -353,32 +355,30 @@ function RelationshipFields({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex gap-2">
-        <select
-          className={inputClass}
-          value={choice}
-          onChange={(e) => {
-            setChoice(e.target.value as RelChoice)
-            setSubtype('')
-          }}
-        >
-          {(Object.keys(REL_LABELS) as RelChoice[]).map((c) => (
-            <option key={c} value={c}>
-              {REL_LABELS[c]}
-            </option>
-          ))}
-        </select>
-        <select
-          className={inputClass}
-          value={otherId}
-          onChange={(e) => setOtherId(e.target.value)}
-        >
-          <option value="">Select person…</option>
-          {candidates.map((p) => (
-            <option key={p.nodeId} value={p.nodeId}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+        <div className="min-w-0 flex-1">
+          <select
+            className={inputClass}
+            value={choice}
+            onChange={(e) => {
+              setChoice(e.target.value as RelChoice)
+              setSubtype('')
+            }}
+          >
+            {(Object.keys(REL_LABELS) as RelChoice[]).map((c) => (
+              <option key={c} value={c}>
+                {REL_LABELS[c]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="min-w-0 flex-1">
+          <PersonPicker
+            ariaLabel="Select person"
+            options={candidates.map((p) => ({ id: p.nodeId, label: p.name }))}
+            value={otherId || null}
+            onChange={(id) => setOtherId(id ?? '')}
+          />
+        </div>
       </div>
       <select
         className={inputClass}
@@ -633,6 +633,15 @@ function PersonPanel({
     () => inferSiblings(graph, person.nodeId),
     [graph, person.nodeId],
   )
+  // Likely "other parent(s)" — partners of this person's known parents who
+  // aren't already parents themselves — offered as one-tap adds below.
+  const parentSuggestions = useMemo(
+    () => suggestOtherParents(graph, person.nodeId, connected),
+    // `connected` is recomputed each render, but suggestOtherParents is cheap
+    // and derived from the same graph/edges, so key on graph + person.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [graph, person.nodeId],
+  )
 
   // Auto-save: after a short pause once a field actually changes. An empty first
   // name is the one thing we refuse to persist.
@@ -801,6 +810,7 @@ function PersonPanel({
           names={names}
           candidates={candidates}
           siblings={siblings}
+          parentSuggestions={parentSuggestions}
           onChanged={onChanged}
         />
       </div>
@@ -1034,6 +1044,7 @@ function RelationshipsSection({
   names,
   candidates,
   siblings,
+  parentSuggestions,
   onChanged,
 }: {
   groupId: string
@@ -1042,6 +1053,7 @@ function RelationshipsSection({
   names: Record<string, string>
   candidates: PersonNode[]
   siblings: InferredSibling[]
+  parentSuggestions: ParentSuggestion[]
   onChanged: () => void
 }) {
   const [choice, setChoice] = useState<RelChoice>('child_of')
@@ -1080,6 +1092,21 @@ function RelationshipsSection({
       setError(err instanceof Error ? err.message : 'Failed to add')
     } finally {
       setAdding(false)
+    }
+  }
+
+  // One-tap add for a suggested other parent: the suggestion is a parent of this
+  // person, i.e. a `child_of` edge with the default subtype.
+  async function addSuggestedParent(nodeId: string) {
+    setBusyId(nodeId)
+    setError(null)
+    try {
+      await createEdge(groupId, buildEdgeInput('child_of', person.nodeId, nodeId, ''))
+      onChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add')
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -1122,6 +1149,34 @@ function RelationshipsSection({
                 <span className="ml-2 text-xs text-zinc-500">
                   {s.half ? 'half' : 'full'}
                 </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {parentSuggestions.length > 0 && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-sky-900/60 bg-sky-950/30 p-2.5">
+          <p className="text-xs uppercase tracking-wide text-sky-300/80">
+            Likely other parent
+          </p>
+          <ul className="flex flex-col gap-1.5">
+            {parentSuggestions.map((s) => (
+              <li key={s.nodeId} className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-sm text-zinc-200">
+                  {s.name}
+                  <span className="ml-1.5 text-xs text-zinc-500">
+                    partner of {s.viaParentName}
+                  </span>
+                </span>
+                <button
+                  onClick={() => addSuggestedParent(s.nodeId)}
+                  disabled={busyId === s.nodeId}
+                  className="flex shrink-0 items-center gap-1.5 rounded-md border border-sky-800 px-2 py-1 text-xs text-sky-200 hover:bg-sky-900/40 disabled:opacity-40"
+                >
+                  {busyId === s.nodeId && <Spinner />}
+                  Add as parent
+                </button>
               </li>
             ))}
           </ul>

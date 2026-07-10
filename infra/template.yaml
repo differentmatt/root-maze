@@ -390,6 +390,13 @@ Resources:
       RouteKey: 'POST /api/groups'
       Target: !Sub 'integrations/${GroupsIntegration}'
 
+  GroupPatchRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'PATCH /api/groups/{groupId}'
+      Target: !Sub 'integrations/${GroupsIntegration}'
+
   # Phase 1 group-scoped routes. {groupId} is authorized by requireGroupMember
   # inside each handler — the partition key is the isolation boundary.
   GraphGetRoute:
