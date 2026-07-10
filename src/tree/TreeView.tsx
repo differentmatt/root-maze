@@ -20,6 +20,7 @@ import {
 } from '../api'
 import GraphCanvas from './GraphCanvas'
 import { inferSiblings, type InferredSibling } from './siblings'
+import { fullName, bornSuffix, namePartsOf } from './names'
 
 type Status =
   | { state: 'loading' }
@@ -326,22 +327,35 @@ function AddPersonForm({
   groupId: string
   onAdded: (newNodeId: string) => void
 }) {
-  const [name, setName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [middleName, setMiddleName] = useState('')
+  const [birthName, setBirthName] = useState('')
   const [birthdate, setBirthdate] = useState('')
+  // Middle and birth names are the exception, not the rule — keep them tucked
+  // away so the common path stays two fields.
+  const [showMore, setShowMore] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function submit() {
-    if (!name.trim()) return
+    if (!firstName.trim()) return
     setBusy(true)
     setError(null)
     try {
       const node = await createNode(groupId, {
-        name: name.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim() || null,
+        middleName: middleName.trim() || null,
+        birthName: birthName.trim() || null,
         birthdate: birthdate.trim() || null,
       })
-      setName('')
+      setFirstName('')
+      setLastName('')
+      setMiddleName('')
+      setBirthName('')
       setBirthdate('')
+      setShowMore(false)
       onAdded(node.nodeId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add')
@@ -353,14 +367,50 @@ function AddPersonForm({
   return (
     <div className={cardClass}>
       <p className="text-sm font-medium text-zinc-300">Add a person</p>
-      <Field label="Name">
+      <Field label="First name">
         <input
           className={inputClass}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Ada Lovelace"
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+          placeholder="e.g. Ada"
         />
       </Field>
+      <Field label="Last name (optional)">
+        <input
+          className={inputClass}
+          value={lastName}
+          onChange={(e) => setLastName(e.target.value)}
+          placeholder="e.g. Lovelace"
+        />
+      </Field>
+      {showMore ? (
+        <>
+          <Field label="Middle name (optional)">
+            <input
+              className={inputClass}
+              value={middleName}
+              onChange={(e) => setMiddleName(e.target.value)}
+              placeholder="e.g. Byron"
+            />
+          </Field>
+          <Field label="Birth name (optional)">
+            <input
+              className={inputClass}
+              value={birthName}
+              onChange={(e) => setBirthName(e.target.value)}
+              placeholder="Name at birth"
+            />
+          </Field>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setShowMore(true)}
+          className="self-start text-xs text-zinc-500 hover:text-zinc-300"
+        >
+          + Middle / birth name
+        </button>
+      )}
       <Field label="Birthdate (optional)">
         <DateField
           value={birthdate}
@@ -372,12 +422,66 @@ function AddPersonForm({
       <button
         className={primaryBtn}
         onClick={submit}
-        disabled={busy || !name.trim()}
+        disabled={busy || !firstName.trim()}
       >
         {busy ? 'Adding…' : 'Add person'}
       </button>
     </div>
   )
+}
+
+function buildPersonPatch({
+  firstName,
+  lastName,
+  middleName,
+  birthName,
+  birthdate,
+  deathdate,
+  notes,
+  saved,
+  isLegacyName,
+}: {
+  firstName: string
+  lastName: string
+  middleName: string
+  birthName: string
+  birthdate: string
+  deathdate: string
+  notes: string
+  saved: {
+    firstName: string
+    lastName: string
+    middleName: string
+    birthName: string
+    birthdate: string
+    deathdate: string
+    notes: string
+  }
+  isLegacyName: boolean
+}): Parameters<typeof updateNode>[2] {
+  const patch: Parameters<typeof updateNode>[2] = {}
+  const nextFirstName = firstName.trim()
+  const structuredDirty =
+    firstName !== saved.firstName ||
+    lastName !== saved.lastName ||
+    middleName !== saved.middleName ||
+    birthName !== saved.birthName
+
+  if (firstName !== saved.firstName) patch.firstName = nextFirstName
+  if (lastName !== saved.lastName) patch.lastName = lastName.trim() || null
+  if (middleName !== saved.middleName) patch.middleName = middleName.trim() || null
+  if (birthName !== saved.birthName) patch.birthName = birthName.trim() || null
+  if (birthdate !== saved.birthdate) patch.birthdate = birthdate.trim() || null
+  if (deathdate !== saved.deathdate) patch.deathdate = deathdate.trim() || null
+  if (notes !== saved.notes) patch.notes = notes.trim() || null
+
+  // Ensure legacy rows also send firstName when any structured field changes,
+  // so migrating an old single-string name can't persist only lastName/birthName.
+  if (structuredDirty && isLegacyName && patch.firstName === undefined) {
+    patch.firstName = nextFirstName
+  }
+
+  return patch
 }
 
 function PersonPanel({
@@ -401,7 +505,19 @@ function PersonPanel({
   onDeleted: () => void
   onClose: () => void
 }) {
-  const [name, setName] = useState(person.name)
+  // Seed the structured fields from the node, splitting a legacy single name
+  // into first/last so editing an old person starts sensibly if the user opts to
+  // review those fields.
+  const initialParts = namePartsOf(person)
+  const isLegacyName =
+    !person.firstName && !person.lastName && !person.middleName && !person.birthName
+  const [firstName, setFirstName] = useState(initialParts.firstName)
+  const [lastName, setLastName] = useState(initialParts.lastName)
+  const [middleName, setMiddleName] = useState(initialParts.middleName)
+  const [birthName, setBirthName] = useState(initialParts.birthName)
+  const [showMore, setShowMore] = useState(
+    Boolean(initialParts.middleName || initialParts.birthName),
+  )
   const [birthdate, setBirthdate] = useState(person.birthdate ?? '')
   const [deathdate, setDeathdate] = useState(person.deathdate ?? '')
   const [notes, setNotes] = useState(person.notes ?? '')
@@ -409,7 +525,10 @@ function PersonPanel({
 
   // The last values we know are persisted, so we only auto-save real changes.
   const saved = useRef({
-    name: person.name,
+    firstName: initialParts.firstName,
+    lastName: initialParts.lastName,
+    middleName: initialParts.middleName,
+    birthName: initialParts.birthName,
     birthdate: person.birthdate ?? '',
     deathdate: person.deathdate ?? '',
     notes: person.notes ?? '',
@@ -438,29 +557,47 @@ function PersonPanel({
     [graph, person.nodeId],
   )
 
-  // Auto-save: after a short pause once a field actually changes. An empty name
-  // is the one thing we refuse to persist.
+  // Auto-save: after a short pause once a field actually changes. An empty first
+  // name is the one thing we refuse to persist.
   useEffect(() => {
     const dirty =
-      name !== saved.current.name ||
+      firstName !== saved.current.firstName ||
+      lastName !== saved.current.lastName ||
+      middleName !== saved.current.middleName ||
+      birthName !== saved.current.birthName ||
       birthdate !== saved.current.birthdate ||
       deathdate !== saved.current.deathdate ||
       notes !== saved.current.notes
     if (!dirty) return
-    if (!name.trim()) {
-      setSave({ state: 'error', message: 'Name can’t be empty' })
+    if (!firstName.trim()) {
+      setSave({ state: 'error', message: 'First name can’t be empty' })
       return
     }
     const t = setTimeout(async () => {
       setSave({ state: 'saving' })
       try {
-        await updateNode(groupId, person.nodeId, {
-          name: name.trim(),
-          birthdate: birthdate.trim() || null,
-          deathdate: deathdate.trim() || null,
-          notes: notes.trim() || null,
+        const patch = buildPersonPatch({
+          firstName,
+          lastName,
+          middleName,
+          birthName,
+          birthdate,
+          deathdate,
+          notes,
+          saved: saved.current,
+          isLegacyName,
         })
-        saved.current = { name, birthdate, deathdate, notes }
+
+        await updateNode(groupId, person.nodeId, patch)
+        saved.current = {
+          firstName,
+          lastName,
+          middleName,
+          birthName,
+          birthdate,
+          deathdate,
+          notes,
+        }
         setSave({ state: 'saved' })
         onChanged()
       } catch (err) {
@@ -471,12 +608,33 @@ function PersonPanel({
       }
     }, 700)
     return () => clearTimeout(t)
-  }, [name, birthdate, deathdate, notes, groupId, person.nodeId, onChanged])
+  }, [
+    firstName,
+    lastName,
+    middleName,
+    birthName,
+    birthdate,
+    deathdate,
+    notes,
+    groupId,
+    person.nodeId,
+    isLegacyName,
+    onChanged,
+  ])
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border border-zinc-700 bg-zinc-900 p-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-zinc-200">Edit person</p>
+        <div>
+          <p className="text-sm font-medium text-zinc-200">
+            {fullName({ firstName, lastName, middleName }) || 'Edit person'}
+          </p>
+          {bornSuffix({ lastName, birthName }) && (
+            <p className="text-xs italic text-zinc-500">
+              {bornSuffix({ lastName, birthName })}
+            </p>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <SaveStatus save={save} />
           <button
@@ -488,14 +646,50 @@ function PersonPanel({
         </div>
       </div>
 
-      <Field label="Name">
+      <Field label="First name">
         <input
           className={inputClass}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Ada Lovelace"
+          value={firstName}
+          onChange={(e) => setFirstName(e.target.value)}
+          placeholder="e.g. Ada"
         />
       </Field>
+      <Field label="Last name (optional)">
+        <input
+          className={inputClass}
+          value={lastName}
+          onChange={(e) => setLastName(e.target.value)}
+          placeholder="e.g. Lovelace"
+        />
+      </Field>
+      {showMore ? (
+        <>
+          <Field label="Middle name (optional)">
+            <input
+              className={inputClass}
+              value={middleName}
+              onChange={(e) => setMiddleName(e.target.value)}
+              placeholder="e.g. Byron"
+            />
+          </Field>
+          <Field label="Birth name (optional)">
+            <input
+              className={inputClass}
+              value={birthName}
+              onChange={(e) => setBirthName(e.target.value)}
+              placeholder="Name at birth"
+            />
+          </Field>
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setShowMore(true)}
+          className="self-start text-xs text-zinc-500 hover:text-zinc-300"
+        >
+          + Middle / birth name
+        </button>
+      )}
       <Field label="Birthdate">
         <DateField value={birthdate} onChange={setBirthdate} placeholder="Birthdate" />
       </Field>

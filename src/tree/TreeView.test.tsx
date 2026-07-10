@@ -23,10 +23,15 @@ import { getGraph, getMembers, updateNode, deleteNode, linkPersonNode } from '..
 const group = { groupId: 'grp_1', name: 'The Lotts', role: 'owner' }
 
 function person(nodeId: string, name: string) {
+  const [firstName, ...rest] = name.split(' ')
   return {
     nodeId,
     groupId: 'grp_1',
     name,
+    firstName,
+    lastName: rest.join(' ') || null,
+    middleName: null,
+    birthName: null,
     birthdate: null,
     deathdate: null,
     notes: null,
@@ -54,6 +59,23 @@ const graph: Graph = {
       updatedBy: 'acc_1',
     },
   ],
+}
+
+const legacyPerson = {
+  nodeId: 'nod_legacy',
+  groupId: 'grp_1',
+  name: 'Mary Anne Van Der Berg',
+  firstName: null,
+  lastName: null,
+  middleName: null,
+  birthName: null,
+  birthdate: null,
+  deathdate: null,
+  notes: null,
+  accountId: null,
+  createdAt: 't',
+  updatedAt: 't',
+  updatedBy: 'acc_1',
 }
 
 // TreeView fetches members alongside the graph (for who's who); default to an
@@ -103,7 +125,8 @@ describe('TreeView', () => {
     await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
     fireEvent.click(screen.getByText('Ada'))
 
-    expect(screen.getByText('Edit person')).toBeInTheDocument()
+    // The edit panel is open: its first-name field is seeded with Ada.
+    expect(screen.getByDisplayValue('Ada')).toBeInTheDocument()
     // Ada's partner edge is described relative to Ada.
     expect(screen.getByText('partner of Bo')).toBeInTheDocument()
     // The add-person form is hidden while editing a person.
@@ -120,17 +143,50 @@ describe('TreeView', () => {
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByDisplayValue('Ada'), {
-      target: { value: 'Ada L' },
+      target: { value: 'Adele' },
     })
     await waitFor(
       () =>
         expect(updateNode).toHaveBeenCalledWith(
           'grp_1',
           'nod_a',
-          expect.objectContaining({ name: 'Ada L' }),
+          expect.objectContaining({ firstName: 'Adele' }),
         ),
       { timeout: 2000 },
     )
+  })
+
+  it('does not migrate a legacy name when auto-saving unrelated fields', async () => {
+    vi.mocked(getGraph).mockResolvedValue({ nodes: [legacyPerson], edges: [] })
+    vi.mocked(updateNode).mockResolvedValue(legacyPerson)
+    render(<TreeView group={group} />)
+
+    await waitFor(() => expect(screen.getByText('Mary')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Mary'))
+    fireEvent.change(screen.getByPlaceholderText('Anything worth remembering'), {
+      target: { value: 'Keeps legacy name' },
+    })
+
+    await waitFor(
+      () =>
+        expect(updateNode).toHaveBeenCalledWith('grp_1', 'nod_legacy', {
+          notes: 'Keeps legacy name',
+        }),
+      { timeout: 2000 },
+    )
+  })
+
+  it('keeps the full name in the graph node aria-label', async () => {
+    vi.mocked(getGraph).mockResolvedValue({
+      nodes: [person('nod_a', 'Ada Lovelace')],
+      edges: [],
+    })
+    render(<TreeView group={group} />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Ada Lovelace' })).toBeInTheDocument(),
+    )
+    expect(screen.getByText('Ada L.')).toBeInTheDocument()
   })
 
   it('claims a person as yourself via "This is me"', async () => {

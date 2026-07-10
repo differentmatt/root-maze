@@ -1,5 +1,6 @@
 import { getItem, putItem, queryPrefix } from './dynamo.js'
 import { appendLog, membershipKey } from './groups.js'
+import { nodeFullName } from './nodes.js'
 
 // Phase 3: identity linking — connect a signed-in account to a person_node.
 //
@@ -37,7 +38,7 @@ export async function linkedNodeMap(groupId) {
   const nodes = await liveNodes(groupId)
   const map = {}
   for (const n of nodes) {
-    if (n.accountId) map[n.accountId] = { nodeId: n.nodeId, name: n.name }
+    if (n.accountId) map[n.accountId] = { nodeId: n.nodeId, name: nodeFullName(n) }
   }
   return map
 }

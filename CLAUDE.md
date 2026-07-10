@@ -86,7 +86,7 @@ soft-delete, `updatedAt`/`updatedBy`, and appends `link`/`unlink` edit-log rows.
 | Group         | `GROUP#<groupId>`     | `META`            | soft-delete via `deletedAt` |
 | Membership    | `GROUP#<groupId>`     | `MEMBER#<acct>`   | `role: owner \| editor`; `GSI1PK=ACCOUNT#<acct>`, `GSI1SK=GROUP#<groupId>` |
 | invite        | `GROUP#<groupId>`     | `INVITE#<token>`  | `role`, `expiresAt`, `maxUses`, `useCount`; `GSI1PK=INVITE#<token>`, `GSI1SK=GROUP#<groupId>` (token → group) |
-| person_node   | `GROUP#<groupId>`     | `NODE#<nodeId>`   | nullable `accountId` = the linked member (Phase 3); set only via the link endpoint, not a plain node write |
+| person_node   | `GROUP#<groupId>`     | `NODE#<nodeId>`   | structured name: `firstName` (required) + optional `lastName`/`middleName`/`birthName`; the API also returns a derived full `name`. Legacy rows carry only `name` and are tolerated (migrated on next edit). nullable `accountId` = the linked member (Phase 3); set only via the link endpoint, not a plain node write |
 | edge          | `GROUP#<groupId>`     | `EDGE#<edgeId>`   | `edgeKind: parent_child \| partner` |
 | edit_log      | `GROUP#<groupId>`     | `LOG#<ulid>`      | append-only, never mutated |
 
