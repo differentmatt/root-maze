@@ -86,14 +86,14 @@ describe('createNode', () => {
       firstName: '  Ada  ',
       middleName: ' Byron ',
       lastName: ' King ',
-      maidenName: ' Byron ',
+      birthName: ' Byron ',
     })
 
     expect(node.firstName).toBe('Ada')
     expect(node.middleName).toBe('Byron')
     expect(node.lastName).toBe('King')
-    expect(node.maidenName).toBe('Byron')
-    // name is the derived full name (maiden is surfaced as "née", not here).
+    expect(node.birthName).toBe('Byron')
+    // name is the derived full name (birthName is surfaced as "born …", not here).
     expect(node.name).toBe('Ada Byron King')
   })
 
@@ -101,10 +101,10 @@ describe('createNode', () => {
     const node = await createNode('g1', 'acc_1', {
       firstName: 'Bo',
       lastName: '   ',
-      maidenName: '',
+      birthName: '',
     })
     expect(node.lastName).toBeNull()
-    expect(node.maidenName).toBeNull()
+    expect(node.birthName).toBeNull()
     expect(node.name).toBe('Bo')
   })
 

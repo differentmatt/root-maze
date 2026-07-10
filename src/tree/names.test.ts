@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PersonNode } from '../api'
-import { fullName, shortName, neeSuffix, namePartsOf, labelFor } from './names'
+import { fullName, shortName, bornSuffix, namePartsOf, labelFor } from './names'
 
 function node(over: Partial<PersonNode>): PersonNode {
   return {
@@ -10,7 +10,7 @@ function node(over: Partial<PersonNode>): PersonNode {
     firstName: null,
     lastName: null,
     middleName: null,
-    maidenName: null,
+    birthName: null,
     birthdate: null,
     deathdate: null,
     notes: null,
@@ -45,15 +45,15 @@ describe('shortName', () => {
   })
 })
 
-describe('neeSuffix', () => {
-  it('shows a distinct maiden name', () => {
-    expect(neeSuffix({ lastName: 'King', maidenName: 'Byron' })).toBe('née Byron')
+describe('bornSuffix', () => {
+  it('shows a distinct birth name', () => {
+    expect(bornSuffix({ lastName: 'King', birthName: 'Byron' })).toBe('born Byron')
   })
-  it('is empty when the maiden name matches the last name', () => {
-    expect(neeSuffix({ lastName: 'Byron', maidenName: 'Byron' })).toBe('')
+  it('is empty when the birth name matches the last name', () => {
+    expect(bornSuffix({ lastName: 'Byron', birthName: 'Byron' })).toBe('')
   })
-  it('is empty when there is no maiden name', () => {
-    expect(neeSuffix({ lastName: 'King' })).toBe('')
+  it('is empty when there is no birth name', () => {
+    expect(bornSuffix({ lastName: 'King' })).toBe('')
   })
 })
 
@@ -63,13 +63,13 @@ describe('namePartsOf', () => {
       firstName: 'Ada',
       lastName: 'Byron King',
       middleName: '',
-      maidenName: '',
+      birthName: '',
     })
   })
   it('prefers existing structured parts over the legacy name', () => {
     expect(
       namePartsOf({ name: 'ignored', firstName: 'Ada', lastName: 'King' }),
-    ).toEqual({ firstName: 'Ada', lastName: 'King', middleName: '', maidenName: '' })
+    ).toEqual({ firstName: 'Ada', lastName: 'King', middleName: '', birthName: '' })
   })
 })
 

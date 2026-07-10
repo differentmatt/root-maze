@@ -22,7 +22,7 @@ function person(nodeId: string, name: string, accountId: string | null = null) {
     firstName,
     lastName: rest.join(' ') || null,
     middleName: null,
-    maidenName: null,
+    birthName: null,
     birthdate: null,
     deathdate: null,
     notes: null,

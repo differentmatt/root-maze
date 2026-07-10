@@ -10,7 +10,7 @@ import { ValidationError } from './errors.js'
 // ever signing in.
 //
 // Names are structured: firstName (required) plus optional lastName, middleName,
-// and maidenName (name at birth / former name). Legacy rows predate this and
+// and birthName (name at birth / former name). Legacy rows predate this and
 // carry only a single `name` string; nodeFullName below tolerates both, so no
 // data migration is needed — a legacy person keeps rendering, and picks up the
 // structured fields the next time someone edits them.
@@ -41,7 +41,7 @@ export function nodeFullName(item) {
 // Project a stored row down to the public shape the API returns — no PK/SK or
 // soft-delete bookkeeping leaks to the client. `name` is always the derived full
 // name so existing clients keep working; the parts let a richer UI render
-// "First L." and "née …" without re-parsing.
+// "First L." and "born …" without re-parsing.
 function toNode(item) {
   return {
     nodeId: item.nodeId,
@@ -50,7 +50,7 @@ function toNode(item) {
     firstName: item.firstName ?? null,
     lastName: item.lastName ?? null,
     middleName: item.middleName ?? null,
-    maidenName: item.maidenName ?? null,
+    birthName: item.birthName ?? null,
     birthdate: item.birthdate ?? null,
     deathdate: item.deathdate ?? null,
     notes: item.notes ?? null,
@@ -67,7 +67,7 @@ function toNode(item) {
 // deliberately NOT writable here: identity linking has its own integrity-checked
 // endpoint (see lib/links.js), so a plain node write can't bypass the
 // one-account-per-node / one-node-per-account rules.
-const OPTIONAL_NAME_PARTS = ['lastName', 'middleName', 'maidenName']
+const OPTIONAL_NAME_PARTS = ['lastName', 'middleName', 'birthName']
 const PLAIN_WRITABLE = ['birthdate', 'deathdate', 'notes']
 
 function applyWritable(target, input) {
@@ -106,7 +106,7 @@ export async function createNode(groupId, accountId, input) {
     firstName,
     lastName: cleanOpt(input.lastName),
     middleName: cleanOpt(input.middleName),
-    maidenName: cleanOpt(input.maidenName),
+    birthName: cleanOpt(input.birthName),
     birthdate: input.birthdate ?? null,
     deathdate: input.deathdate ?? null,
     notes: input.notes ?? null,

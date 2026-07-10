@@ -69,8 +69,8 @@ export interface PersonNode {
   firstName: string | null
   lastName: string | null
   middleName: string | null
-  // Name at birth / former name, surfaced as "née …" in the UI.
-  maidenName: string | null
+  // Name at birth / former name, surfaced as "born …" in the UI.
+  birthName: string | null
   birthdate: string | null
   deathdate: string | null
   notes: string | null
@@ -112,7 +112,7 @@ export interface NodeInput {
   firstName?: string
   lastName?: string | null
   middleName?: string | null
-  maidenName?: string | null
+  birthName?: string | null
   birthdate?: string | null
   deathdate?: string | null
   notes?: string | null

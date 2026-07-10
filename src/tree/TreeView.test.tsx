@@ -31,7 +31,7 @@ function person(nodeId: string, name: string) {
     firstName,
     lastName: rest.join(' ') || null,
     middleName: null,
-    maidenName: null,
+    birthName: null,
     birthdate: null,
     deathdate: null,
     notes: null,

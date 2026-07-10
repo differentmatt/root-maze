@@ -20,7 +20,7 @@ import {
 } from '../api'
 import GraphCanvas from './GraphCanvas'
 import { inferSiblings, type InferredSibling } from './siblings'
-import { fullName, neeSuffix, namePartsOf } from './names'
+import { fullName, bornSuffix, namePartsOf } from './names'
 
 type Status =
   | { state: 'loading' }
@@ -330,9 +330,9 @@ function AddPersonForm({
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [middleName, setMiddleName] = useState('')
-  const [maidenName, setMaidenName] = useState('')
+  const [birthName, setBirthName] = useState('')
   const [birthdate, setBirthdate] = useState('')
-  // Middle and maiden names are the exception, not the rule — keep them tucked
+  // Middle and birth names are the exception, not the rule — keep them tucked
   // away so the common path stays two fields.
   const [showMore, setShowMore] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -347,13 +347,13 @@ function AddPersonForm({
         firstName: firstName.trim(),
         lastName: lastName.trim() || null,
         middleName: middleName.trim() || null,
-        maidenName: maidenName.trim() || null,
+        birthName: birthName.trim() || null,
         birthdate: birthdate.trim() || null,
       })
       setFirstName('')
       setLastName('')
       setMiddleName('')
-      setMaidenName('')
+      setBirthName('')
       setBirthdate('')
       setShowMore(false)
       onAdded(node.nodeId)
@@ -393,11 +393,11 @@ function AddPersonForm({
               placeholder="e.g. Byron"
             />
           </Field>
-          <Field label="Maiden name (optional)">
+          <Field label="Birth name (optional)">
             <input
               className={inputClass}
-              value={maidenName}
-              onChange={(e) => setMaidenName(e.target.value)}
+              value={birthName}
+              onChange={(e) => setBirthName(e.target.value)}
               placeholder="Name at birth"
             />
           </Field>
@@ -408,7 +408,7 @@ function AddPersonForm({
           onClick={() => setShowMore(true)}
           className="self-start text-xs text-zinc-500 hover:text-zinc-300"
         >
-          + Middle / maiden name
+          + Middle / birth name
         </button>
       )}
       <Field label="Birthdate (optional)">
@@ -457,9 +457,9 @@ function PersonPanel({
   const [firstName, setFirstName] = useState(initialParts.firstName)
   const [lastName, setLastName] = useState(initialParts.lastName)
   const [middleName, setMiddleName] = useState(initialParts.middleName)
-  const [maidenName, setMaidenName] = useState(initialParts.maidenName)
+  const [birthName, setBirthName] = useState(initialParts.birthName)
   const [showMore, setShowMore] = useState(
-    Boolean(initialParts.middleName || initialParts.maidenName),
+    Boolean(initialParts.middleName || initialParts.birthName),
   )
   const [birthdate, setBirthdate] = useState(person.birthdate ?? '')
   const [deathdate, setDeathdate] = useState(person.deathdate ?? '')
@@ -471,7 +471,7 @@ function PersonPanel({
     firstName: initialParts.firstName,
     lastName: initialParts.lastName,
     middleName: initialParts.middleName,
-    maidenName: initialParts.maidenName,
+    birthName: initialParts.birthName,
     birthdate: person.birthdate ?? '',
     deathdate: person.deathdate ?? '',
     notes: person.notes ?? '',
@@ -507,7 +507,7 @@ function PersonPanel({
       firstName !== saved.current.firstName ||
       lastName !== saved.current.lastName ||
       middleName !== saved.current.middleName ||
-      maidenName !== saved.current.maidenName ||
+      birthName !== saved.current.birthName ||
       birthdate !== saved.current.birthdate ||
       deathdate !== saved.current.deathdate ||
       notes !== saved.current.notes
@@ -523,7 +523,7 @@ function PersonPanel({
           firstName: firstName.trim(),
           lastName: lastName.trim() || null,
           middleName: middleName.trim() || null,
-          maidenName: maidenName.trim() || null,
+          birthName: birthName.trim() || null,
           birthdate: birthdate.trim() || null,
           deathdate: deathdate.trim() || null,
           notes: notes.trim() || null,
@@ -532,7 +532,7 @@ function PersonPanel({
           firstName,
           lastName,
           middleName,
-          maidenName,
+          birthName,
           birthdate,
           deathdate,
           notes,
@@ -551,7 +551,7 @@ function PersonPanel({
     firstName,
     lastName,
     middleName,
-    maidenName,
+    birthName,
     birthdate,
     deathdate,
     notes,
@@ -567,9 +567,9 @@ function PersonPanel({
           <p className="text-sm font-medium text-zinc-200">
             {fullName({ firstName, lastName, middleName }) || 'Edit person'}
           </p>
-          {neeSuffix({ lastName, maidenName }) && (
+          {bornSuffix({ lastName, birthName }) && (
             <p className="text-xs italic text-zinc-500">
-              {neeSuffix({ lastName, maidenName })}
+              {bornSuffix({ lastName, birthName })}
             </p>
           )}
         </div>
@@ -610,11 +610,11 @@ function PersonPanel({
               placeholder="e.g. Byron"
             />
           </Field>
-          <Field label="Maiden name (optional)">
+          <Field label="Birth name (optional)">
             <input
               className={inputClass}
-              value={maidenName}
-              onChange={(e) => setMaidenName(e.target.value)}
+              value={birthName}
+              onChange={(e) => setBirthName(e.target.value)}
               placeholder="Name at birth"
             />
           </Field>
@@ -625,7 +625,7 @@ function PersonPanel({
           onClick={() => setShowMore(true)}
           className="self-start text-xs text-zinc-500 hover:text-zinc-300"
         >
-          + Middle / maiden name
+          + Middle / birth name
         </button>
       )}
       <Field label="Birthdate">

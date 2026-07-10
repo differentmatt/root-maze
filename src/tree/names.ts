@@ -1,5 +1,6 @@
 // Name helpers shared by the tree UI. Names are structured (firstName plus
-// optional lastName/middleName/maidenName), but legacy nodes carry only a single
+// optional lastName/middleName/birthName; birthName = name at birth / former
+// name), but legacy nodes carry only a single
 // `name` string, so every helper tolerates both shapes.
 
 import type { PersonNode } from '../api'
@@ -11,7 +12,7 @@ export type NameParts = {
   firstName?: string | null
   lastName?: string | null
   middleName?: string | null
-  maidenName?: string | null
+  birthName?: string | null
 }
 
 // Best-effort first token when a node has no structured firstName (legacy rows).
@@ -27,14 +28,14 @@ export function namePartsOf(n: NameParts): {
   firstName: string
   lastName: string
   middleName: string
-  maidenName: string
+  birthName: string
 } {
-  if (n.firstName || n.lastName || n.middleName || n.maidenName) {
+  if (n.firstName || n.lastName || n.middleName || n.birthName) {
     return {
       firstName: n.firstName ?? '',
       lastName: n.lastName ?? '',
       middleName: n.middleName ?? '',
-      maidenName: n.maidenName ?? '',
+      birthName: n.birthName ?? '',
     }
   }
   const tokens = (n.name ?? '').trim().split(/\s+/).filter(Boolean)
@@ -42,7 +43,7 @@ export function namePartsOf(n: NameParts): {
     firstName: tokens[0] ?? '',
     lastName: tokens.slice(1).join(' '),
     middleName: '',
-    maidenName: '',
+    birthName: '',
   }
 }
 
@@ -64,13 +65,13 @@ export function shortName(n: NameParts): string {
   return first || (n.name ?? '').trim()
 }
 
-// "née Byron" suffix for someone whose maiden/birth name differs from their
-// current last name. Empty when there's nothing distinct to show.
-export function neeSuffix(n: NameParts): string {
-  const maiden = (n.maidenName ?? '').trim()
-  if (!maiden) return ''
-  if (maiden === (n.lastName ?? '').trim()) return ''
-  return `née ${maiden}`
+// "born Byron" suffix for someone whose birth name differs from their current
+// last name. Empty when there's nothing distinct to show.
+export function bornSuffix(n: NameParts): string {
+  const birth = (n.birthName ?? '').trim()
+  if (!birth) return ''
+  if (birth === (n.lastName ?? '').trim()) return ''
+  return `born ${birth}`
 }
 
 // Label for a node within a set of nodes: the compact form, widened to the full
