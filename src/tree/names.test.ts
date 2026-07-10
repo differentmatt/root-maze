@@ -40,6 +40,9 @@ describe('shortName', () => {
   it('is just the first name without a last name', () => {
     expect(shortName({ firstName: 'Ada' })).toBe('Ada')
   })
+  it('takes the surname initial by Unicode code point', () => {
+    expect(shortName({ firstName: 'Aki', lastName: '𠮷田' })).toBe('Aki 𠮷.')
+  })
   it('derives the first token from a legacy name', () => {
     expect(shortName({ name: 'Ada Lovelace' })).toBe('Ada')
   })

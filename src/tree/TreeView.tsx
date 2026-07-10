@@ -452,8 +452,11 @@ function PersonPanel({
   onClose: () => void
 }) {
   // Seed the structured fields from the node, splitting a legacy single name
-  // into first/last so editing an old person starts sensibly (and migrates it).
+  // into first/last so editing an old person starts sensibly if the user opts to
+  // review those fields.
   const initialParts = useMemo(() => namePartsOf(person), [person])
+  const isLegacyName =
+    !person.firstName && !person.lastName && !person.middleName && !person.birthName
   const [firstName, setFirstName] = useState(initialParts.firstName)
   const [lastName, setLastName] = useState(initialParts.lastName)
   const [middleName, setMiddleName] = useState(initialParts.middleName)
@@ -519,14 +522,36 @@ function PersonPanel({
     const t = setTimeout(async () => {
       setSave({ state: 'saving' })
       try {
+        const patch: Parameters<typeof updateNode>[2] = {}
+        const nextFirstName = firstName.trim()
+        const structuredDirty =
+          firstName !== saved.current.firstName ||
+          lastName !== saved.current.lastName ||
+          middleName !== saved.current.middleName ||
+          birthName !== saved.current.birthName
+
+        if (firstName !== saved.current.firstName) patch.firstName = nextFirstName
+        if (lastName !== saved.current.lastName) patch.lastName = lastName.trim() || null
+        if (middleName !== saved.current.middleName) {
+          patch.middleName = middleName.trim() || null
+        }
+        if (birthName !== saved.current.birthName) {
+          patch.birthName = birthName.trim() || null
+        }
+        if (birthdate !== saved.current.birthdate) {
+          patch.birthdate = birthdate.trim() || null
+        }
+        if (deathdate !== saved.current.deathdate) {
+          patch.deathdate = deathdate.trim() || null
+        }
+        if (notes !== saved.current.notes) patch.notes = notes.trim() || null
+
+        if (structuredDirty && isLegacyName && patch.firstName === undefined) {
+          patch.firstName = nextFirstName
+        }
+
         await updateNode(groupId, person.nodeId, {
-          firstName: firstName.trim(),
-          lastName: lastName.trim() || null,
-          middleName: middleName.trim() || null,
-          birthName: birthName.trim() || null,
-          birthdate: birthdate.trim() || null,
-          deathdate: deathdate.trim() || null,
-          notes: notes.trim() || null,
+          ...patch,
         })
         saved.current = {
           firstName,
@@ -557,6 +582,7 @@ function PersonPanel({
     notes,
     groupId,
     person.nodeId,
+    isLegacyName,
     onChanged,
   ])
 

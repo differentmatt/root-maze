@@ -23,7 +23,8 @@ function firstOf(n: NameParts): string {
 
 // The structured parts to seed an edit form, filling first/last from a legacy
 // single name (first token → firstName, the rest → lastName) so editing a legacy
-// person starts from something sensible and migrates it on save.
+// person starts from something sensible when the user chooses to review those
+// fields.
 export function namePartsOf(n: NameParts): {
   firstName: string
   lastName: string
@@ -47,6 +48,10 @@ export function namePartsOf(n: NameParts): {
   }
 }
 
+function initialOf(name: string): string {
+  return Array.from(name)[0] ?? ''
+}
+
 // Full name: "First Middle Last", falling back to the legacy string.
 export function fullName(n: NameParts): string {
   const parts = [n.firstName, n.middleName, n.lastName]
@@ -61,7 +66,7 @@ export function fullName(n: NameParts): string {
 export function shortName(n: NameParts): string {
   const first = firstOf(n)
   const last = (n.lastName ?? '').trim()
-  if (first && last) return `${first} ${last[0]}.`
+  if (first && last) return `${first} ${initialOf(last)}.`
   return first || (n.name ?? '').trim()
 }
 

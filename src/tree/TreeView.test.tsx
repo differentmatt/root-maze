@@ -61,6 +61,23 @@ const graph: Graph = {
   ],
 }
 
+const legacyPerson = {
+  nodeId: 'nod_legacy',
+  groupId: 'grp_1',
+  name: 'Mary Anne Van Der Berg',
+  firstName: null,
+  lastName: null,
+  middleName: null,
+  birthName: null,
+  birthdate: null,
+  deathdate: null,
+  notes: null,
+  accountId: null,
+  createdAt: 't',
+  updatedAt: 't',
+  updatedBy: 'acc_1',
+}
+
 // TreeView fetches members alongside the graph (for who's who); default to an
 // empty roster so the graph drives each test unless overridden.
 beforeEach(() => {
@@ -137,6 +154,39 @@ describe('TreeView', () => {
         ),
       { timeout: 2000 },
     )
+  })
+
+  it('does not migrate a legacy name when auto-saving unrelated fields', async () => {
+    vi.mocked(getGraph).mockResolvedValue({ nodes: [legacyPerson], edges: [] })
+    vi.mocked(updateNode).mockResolvedValue(legacyPerson)
+    render(<TreeView group={group} />)
+
+    await waitFor(() => expect(screen.getByText('Mary')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Mary'))
+    fireEvent.change(screen.getByPlaceholderText('Anything worth remembering'), {
+      target: { value: 'Keeps legacy name' },
+    })
+
+    await waitFor(
+      () =>
+        expect(updateNode).toHaveBeenCalledWith('grp_1', 'nod_legacy', {
+          notes: 'Keeps legacy name',
+        }),
+      { timeout: 2000 },
+    )
+  })
+
+  it('keeps the full name in the graph node aria-label', async () => {
+    vi.mocked(getGraph).mockResolvedValue({
+      nodes: [person('nod_a', 'Ada Lovelace')],
+      edges: [],
+    })
+    render(<TreeView group={group} />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Ada Lovelace' })).toBeInTheDocument(),
+    )
+    expect(screen.getByText('Ada L.')).toBeInTheDocument()
   })
 
   it('claims a person as yourself via "This is me"', async () => {

@@ -128,6 +128,10 @@ export async function updateNode(groupId, accountId, nodeId, patch) {
   const existing = await getItem(nodeKey(groupId, nodeId))
   if (!existing || existing.deletedAt) return null
 
+  const touchesStructuredName =
+    patch.firstName !== undefined ||
+    OPTIONAL_NAME_PARTS.some((field) => patch[field] !== undefined)
+
   if (patch.firstName !== undefined) {
     const firstName = typeof patch.firstName === 'string' ? patch.firstName.trim() : ''
     if (!firstName) throw new ValidationError('First name cannot be empty')
@@ -137,6 +141,10 @@ export async function updateNode(groupId, accountId, nodeId, patch) {
   const before = toNode(existing)
   const updated = { ...existing }
   applyWritable(updated, patch)
+  if (touchesStructuredName) {
+    const firstName = typeof updated.firstName === 'string' ? updated.firstName.trim() : ''
+    if (!firstName) throw new ValidationError('Missing first name')
+  }
   updated.updatedAt = new Date().toISOString()
   updated.updatedBy = accountId
 

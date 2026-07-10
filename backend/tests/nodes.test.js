@@ -151,6 +151,19 @@ describe('updateNode', () => {
     expect(node.name).toBe('Ada Lovelace')
   })
 
+  it('rejects optional structured parts on a legacy row without a first name', async () => {
+    vi.mocked(getItem).mockResolvedValueOnce({
+      PK: 'GROUP#g1', SK: 'NODE#nod_1',
+      nodeId: 'nod_1', groupId: 'g1', name: 'Ada Lovelace', deletedAt: null,
+      createdAt: 't0', updatedAt: 't0', updatedBy: 'acc_0',
+    })
+
+    await expect(
+      updateNode('g1', 'acc_1', 'nod_1', { lastName: 'Lovelace' }),
+    ).rejects.toBeInstanceOf(ValidationError)
+    expect(putItem).not.toHaveBeenCalled()
+  })
+
   it('applies only writable fields and stamps updatedBy', async () => {
     vi.mocked(getItem).mockResolvedValueOnce({
       PK: 'GROUP#g1', SK: 'NODE#nod_1',

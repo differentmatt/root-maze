@@ -262,6 +262,7 @@ export default function GraphCanvas({
             const isMe = meNodeId != null && n.nodeId === meNodeId
             const linked = Boolean(n.accountId)
             const label = labelFor(n, nodes)
+            const ariaName = n.name || label
             return (
               <g
                 key={n.nodeId}
@@ -275,7 +276,7 @@ export default function GraphCanvas({
                 }}
                 tabIndex={0}
                 role="button"
-                aria-label={isMe ? `${label} (you)` : label}
+                aria-label={isMe ? `${ariaName} (you)` : ariaName}
                 aria-pressed={selected}
                 className="cursor-pointer"
               >
