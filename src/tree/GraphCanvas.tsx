@@ -16,8 +16,11 @@ const FOCUS_DEPTH = 3
 // transform, however big the graph gets.
 const WIDTH = 600
 const HEIGHT = 460
-// Zoom-out floor low enough to fit a hundred-plus-person tree on screen.
+// Default zoom-out floor for interactive pinch/scroll. A very large tree may
+// need to fit at a smaller scale than this; in that case the floor drops to
+// whatever fits (down to ABS_MIN_K) so the whole tree stays reachable.
 const MIN_K = 0.05
+const ABS_MIN_K = 0.02
 const MAX_K = 4
 const NODE_R = 18
 // Padding (in viewport units) around the tree when fit into view.
@@ -79,12 +82,12 @@ export default function GraphCanvas({
   )
 
   // In focus mode, center on the user's pick, else their claimed node, else the
-  // first person — but only if that person is actually present.
-  const focusCandidate = focusId ?? meNodeId ?? nodes[0]?.nodeId ?? null
+  // first person — taking the first candidate that's actually present, so a
+  // stale (e.g. just-deleted) focus falls through instead of blanking focus.
   const effectiveFocus =
-    focusCandidate && nodes.some((n) => n.nodeId === focusCandidate)
-      ? focusCandidate
-      : null
+    [focusId, meNodeId, nodes[0]?.nodeId].find(
+      (id) => id != null && nodes.some((n) => n.nodeId === id),
+    ) ?? null
 
   // The people (and edges between them) this view actually shows.
   const visible = useMemo(() => {
@@ -146,6 +149,22 @@ export default function GraphCanvas({
   )
   const pos = layout.pos
 
+  // The scale that fits the whole current layout, allowed below the interactive
+  // floor (down to ABS_MIN_K) so even a very wide/tall tree fits fully.
+  const wholeFitK = useMemo(() => {
+    const cw = layout.width
+    const ch = layout.height
+    if (cw <= 0 || ch <= 0) return 1
+    return Math.max(
+      ABS_MIN_K,
+      Math.min((WIDTH - 2 * FIT_PAD) / cw, (HEIGHT - 2 * FIT_PAD) / ch),
+    )
+  }, [layout.width, layout.height])
+
+  // Interactive zoom-out floor: normally MIN_K, but never above the scale that
+  // fits the whole tree, so the user can always reach a full view.
+  const minZoom = Math.min(MIN_K, wholeFitK)
+
   // A view (pan/zoom) that fits a content box of size cw×ch, centered on the
   // point (cx, cy), into the viewport — clamped to the zoom range.
   const viewFitting = useCallback(
@@ -153,7 +172,7 @@ export default function GraphCanvas({
       const k = Math.min(
         maxK,
         Math.max(
-          MIN_K,
+          minZoom,
           Math.min(
             (WIDTH - 2 * FIT_PAD) / Math.max(cw, 1),
             (HEIGHT - 2 * FIT_PAD) / Math.max(ch, 1),
@@ -162,7 +181,7 @@ export default function GraphCanvas({
       )
       return { k, x: WIDTH / 2 - k * cx, y: HEIGHT / 2 - k * cy }
     },
-    [],
+    [minZoom],
   )
 
   // Fit the whole tree centered in the viewport.
@@ -234,12 +253,12 @@ export default function GraphCanvas({
     (clientX: number, clientY: number, factor: number) => {
       const q = toUser(clientX, clientY)
       setView((v) => {
-        const k = Math.min(MAX_K, Math.max(MIN_K, v.k * factor))
+        const k = Math.min(MAX_K, Math.max(minZoom, v.k * factor))
         const f = k / v.k
         return { k, x: q.x - f * (q.x - v.x), y: q.y - f * (q.y - v.y) }
       })
     },
-    [toUser],
+    [toUser, minZoom],
   )
 
   // Wheel must be a non-passive native listener so preventDefault() can stop
@@ -318,13 +337,17 @@ export default function GraphCanvas({
     }
   }
 
-  // A tap only selects if the pointer didn't drag (which would be a pan). In
-  // focus mode a tap also re-centers the view on that person, so the graph
-  // becomes a way to walk the family one relative at a time.
-  function selectIfTap(nodeId: string) {
-    if (moved.current) return
+  // Activate a person: select them and, in focus mode, re-center the view on
+  // them so the graph becomes a way to walk the family one relative at a time.
+  // Shared by pointer taps and keyboard (Enter/Space) so both can navigate.
+  function activate(nodeId: string) {
     if (mode === 'focus') setFocusId(nodeId)
     onSelect(nodeId)
+  }
+
+  // A tap only activates if the pointer didn't drag (which would be a pan).
+  function selectIfTap(nodeId: string) {
+    if (!moved.current) activate(nodeId)
   }
 
   // Enter focus mode centered on the current selection (or the "me" node).
@@ -425,7 +448,7 @@ export default function GraphCanvas({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault()
-                    onSelect(n.nodeId)
+                    activate(n.nodeId)
                   }
                 }}
                 tabIndex={0}
@@ -443,11 +466,12 @@ export default function GraphCanvas({
                     strokeWidth={2}
                   />
                 )}
-                {/* Amber ring marks the person the focus view is centered on
-                    (skipped when it's already the emerald "me" node). */}
-                {isFocus && !isMe && (
+                {/* Amber ring marks the person the focus view is centered on.
+                    When that's also the emerald "me" node, it sits just outside
+                    so both stay visible. */}
+                {isFocus && (
                   <circle
-                    r={NODE_R + 4}
+                    r={isMe ? NODE_R + 7 : NODE_R + 4}
                     fill="none"
                     stroke="#fbbf24"
                     strokeWidth={2}
