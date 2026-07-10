@@ -46,7 +46,6 @@ export default function PersonPicker({
   const [active, setActive] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const listRef = useRef<HTMLUListElement>(null)
   const baseId = useId()
   const listId = `${baseId}-listbox`
   const optionId = (i: number) => `${baseId}-opt-${i}`
@@ -84,12 +83,12 @@ export default function PersonPicker({
   // max height — otherwise arrowing down would select a row you can't see.
   useEffect(() => {
     if (!open) return
-    const el = listRef.current?.querySelector<HTMLElement>(
-      `[data-index="${active}"]`,
-    )
+    // Use getElementById instead of querySelector to avoid CSS-escaping the
+    // colon-containing IDs produced by useId().
+    const el = document.getElementById(`${baseId}-opt-${active}`)
     // Optional-call: jsdom (tests) and some older engines don't implement it.
     el?.scrollIntoView?.({ block: 'nearest' })
-  }, [active, open])
+  }, [active, baseId, open])
 
   // Close on click outside or Escape.
   useEffect(() => {
@@ -168,7 +167,6 @@ export default function PersonPicker({
             />
           </div>
           <ul
-            ref={listRef}
             id={listId}
             role="listbox"
             aria-label={ariaLabel}
@@ -190,7 +188,6 @@ export default function PersonPicker({
                   <li
                     key={row.id ?? '__clear__'}
                     id={optionId(i)}
-                    data-index={i}
                     role="option"
                     aria-selected={isSelected}
                     onMouseEnter={() => setActive(i)}
