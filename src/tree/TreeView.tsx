@@ -260,6 +260,19 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
           </section>
 
           <section>
+            <h3 className="mb-1 text-xs uppercase tracking-wide text-zinc-500">
+              Who's who
+            </h3>
+            <p>
+              Tap a person and use{' '}
+              <span className="text-zinc-100">This is me</span> to claim your own
+              node. In the <span className="text-zinc-100">Group</span> tab you
+              can link any member to their person, so the tree shows who each
+              account is.
+            </p>
+          </section>
+
+          <section>
             <h3 className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
               Legend
             </h3>

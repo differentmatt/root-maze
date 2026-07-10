@@ -118,8 +118,7 @@ member's `linkedNodeId`/`linkedNodeName`.
   switch, rename, new group, members); also the `/?invite=<token>` join route
 - `src/tree/` — `TreeView` (group screen), `GraphCanvas` + `layout` (SVG graph),
   `siblings` + `suggestions` (derived relationships, incl. likely other parent)
-- `src/members/` — `MembersPanel` (members + roles + invite links; shows each
-  member's linked person read-only — claiming happens in the tree),
+- `src/members/` — `MembersPanel` (members + invite links + who's-who linking),
   `JoinScreen` (accept + optional link-on-join)
 - `src/components/PersonPicker` — searchable person combobox (replaces long
   `<select>` lists in the tree + members UIs)

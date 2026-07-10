@@ -10,6 +10,9 @@ vi.mock('../api', async (importOriginal) => ({
   getInvites: vi.fn(),
   createInvite: vi.fn(),
   revokeInvite: vi.fn(),
+  getGraph: vi.fn(),
+  linkPersonNode: vi.fn(),
+  unlinkPersonNode: vi.fn(),
 }))
 
 import {
@@ -19,6 +22,9 @@ import {
   getInvites,
   createInvite,
   revokeInvite,
+  getGraph,
+  linkPersonNode,
+  unlinkPersonNode,
 } from '../api'
 
 const group = { groupId: 'grp_1', name: 'The Lotts', role: 'owner' }
@@ -47,6 +53,24 @@ const members = {
   me: 'acc_1',
 }
 
+const graph = {
+  nodes: [
+    {
+      nodeId: 'nod_1',
+      groupId: 'grp_1',
+      name: 'Ann Lott',
+      birthdate: null,
+      deathdate: null,
+      notes: null,
+      accountId: null,
+      createdAt: 't',
+      updatedAt: 't',
+      updatedBy: 'acc_1',
+    },
+  ],
+  edges: [],
+}
+
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
@@ -55,6 +79,7 @@ afterEach(() => {
 function ready(invites: unknown[] = []) {
   vi.mocked(getMembers).mockResolvedValue(members)
   vi.mocked(getInvites).mockResolvedValue({ invites: invites as never })
+  vi.mocked(getGraph).mockResolvedValue(graph as never)
 }
 
 describe('MembersPanel', () => {
@@ -141,7 +166,21 @@ describe('MembersPanel', () => {
     )
   })
 
-  it('shows a linked member as read-only (no linking control)', async () => {
+  it('links a member to a person via the picker', async () => {
+    ready()
+    vi.mocked(linkPersonNode).mockResolvedValue({ accountId: 'acc_1', nodeId: 'nod_1' })
+    render(<MembersPanel group={group} />)
+    await waitFor(() => expect(screen.getByText('Ann')).toBeInTheDocument())
+
+    const picker = screen.getByLabelText('Linked person for Ann')
+    fireEvent.click(picker)
+    fireEvent.click(await screen.findByText('Ann Lott'))
+    await waitFor(() =>
+      expect(linkPersonNode).toHaveBeenCalledWith('grp_1', 'acc_1', 'nod_1'),
+    )
+  })
+
+  it('unlinks a linked member by choosing "not linked"', async () => {
     vi.mocked(getMembers).mockResolvedValue({
       members: [
         {
@@ -154,14 +193,24 @@ describe('MembersPanel', () => {
       me: 'acc_1',
     })
     vi.mocked(getInvites).mockResolvedValue({ invites: [] })
+    vi.mocked(getGraph).mockResolvedValue({
+      nodes: [{ ...graph.nodes[0], accountId: 'acc_1' }],
+      edges: [],
+    } as never)
+    vi.mocked(unlinkPersonNode).mockResolvedValue({
+      accountId: 'acc_1',
+      nodeId: 'nod_1',
+      unlinked: true,
+    })
     render(<MembersPanel group={group} />)
     await waitFor(() => expect(screen.getByText('Ann')).toBeInTheDocument())
 
-    // The member's linked person is surfaced read-only…
-    expect(screen.getByText('Ann Lott')).toBeInTheDocument()
-    // …and there is no person picker/dropdown to edit the link here.
-    expect(screen.queryByLabelText(/Linked person for/)).not.toBeInTheDocument()
-    expect(screen.queryByText('Link a person…')).not.toBeInTheDocument()
+    const picker = screen.getByLabelText('Linked person for Ann')
+    fireEvent.click(picker)
+    fireEvent.click(await screen.findByText('— not linked —'))
+    await waitFor(() =>
+      expect(unlinkPersonNode).toHaveBeenCalledWith('grp_1', 'acc_1'),
+    )
   })
 
   it('revokes an invite', async () => {
