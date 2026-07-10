@@ -146,26 +146,70 @@ export default function GraphCanvas({
   )
   const pos = layout.pos
 
-  // The view (pan/zoom) that fits the whole tree centered in the viewport.
+  // A view (pan/zoom) that fits a content box of size cw×ch, centered on the
+  // point (cx, cy), into the viewport — clamped to the zoom range.
+  const viewFitting = useCallback(
+    (cx: number, cy: number, cw: number, ch: number, maxK: number): View => {
+      const k = Math.min(
+        maxK,
+        Math.max(
+          MIN_K,
+          Math.min(
+            (WIDTH - 2 * FIT_PAD) / Math.max(cw, 1),
+            (HEIGHT - 2 * FIT_PAD) / Math.max(ch, 1),
+          ),
+        ),
+      )
+      return { k, x: WIDTH / 2 - k * cx, y: HEIGHT / 2 - k * cy }
+    },
+    [],
+  )
+
+  // Fit the whole tree centered in the viewport.
   const fitView = useCallback((): View => {
     const cw = layout.width
     const ch = layout.height
     if (cw <= 0 || ch <= 0) return { x: 0, y: 0, k: 1 }
-    const k = Math.min(
-      MAX_K,
-      Math.max(
-        MIN_K,
-        Math.min((WIDTH - 2 * FIT_PAD) / cw, (HEIGHT - 2 * FIT_PAD) / ch),
-      ),
-    )
-    return { k, x: (WIDTH - k * cw) / 2, y: (HEIGHT - k * ch) / 2 }
-  }, [layout.width, layout.height])
+    return viewFitting(cw / 2, ch / 2, cw, ch, MAX_K)
+  }, [layout.width, layout.height, viewFitting])
 
-  // Fit the tree in view whenever its shape (and thus layout) changes, so the
-  // user lands on the whole family without having to zoom out by hand.
+  // Zoom in on the focus person and their immediate relatives. Unlike fitting
+  // the whole neighborhood (which, for a small family, is the entire tree and
+  // so looks like nothing happened), this always visibly re-centers on the
+  // chosen person — the point of the focus view.
+  const focusView = useCallback((): View => {
+    const c = effectiveFocus && pos[effectiveFocus]
+    if (!c) return fitView()
+    const near = new Set<string>([effectiveFocus!])
+    for (const e of shownEdges) {
+      if (e.fromPerson === effectiveFocus) near.add(e.toPerson)
+      if (e.toPerson === effectiveFocus) near.add(e.fromPerson)
+    }
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const id of near) {
+      const p = pos[id]
+      if (!p) continue
+      minX = Math.min(minX, p.x)
+      minY = Math.min(minY, p.y)
+      maxX = Math.max(maxX, p.x)
+      maxY = Math.max(maxY, p.y)
+    }
+    // Pad for node radius + labels, and keep a floor so a lone person doesn't
+    // zoom in absurdly far.
+    const cw = Math.max(maxX - minX + 4 * NODE_R, 260)
+    const ch = Math.max(maxY - minY + 4 * NODE_R, 220)
+    return viewFitting((minX + maxX) / 2, (minY + maxY) / 2, cw, ch, 1.4)
+  }, [effectiveFocus, pos, shownEdges, fitView, viewFitting])
+
+  // Re-frame the view whenever the mode, focus person, or graph shape changes:
+  // fit the whole tree in tree mode, zoom to the person in focus mode. Manual
+  // pan/zoom is preserved between these changes.
   useEffect(() => {
-    setView(fitView())
-  }, [fitView])
+    setView(mode === 'focus' ? focusView() : fitView())
+  }, [mode, focusView, fitView])
 
   // Map client (screen) coordinates to SVG user space via the <svg>'s own CTM,
   // which is independent of our pan/zoom transform — so deltas stay stable.
