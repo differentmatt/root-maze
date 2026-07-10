@@ -48,6 +48,8 @@ export function namePartsOf(n: NameParts): {
   }
 }
 
+// Take the first Unicode code point, so surnames like "𠮷田" keep their real
+// initial instead of a lone UTF-16 surrogate.
 function initialOf(name: string): string {
   return Array.from(name)[0] ?? ''
 }

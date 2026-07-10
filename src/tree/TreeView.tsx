@@ -546,6 +546,9 @@ function PersonPanel({
         }
         if (notes !== saved.current.notes) patch.notes = notes.trim() || null
 
+        // Legacy rows still store only `name`; when a user edits one structured
+        // part, include firstName too so the backend doesn't receive a partial
+        // migration like only lastName/birthName.
         if (structuredDirty && isLegacyName && patch.firstName === undefined) {
           patch.firstName = nextFirstName
         }

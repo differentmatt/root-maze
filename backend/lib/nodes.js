@@ -141,6 +141,8 @@ export async function updateNode(groupId, accountId, nodeId, patch) {
   const before = toNode(existing)
   const updated = { ...existing }
   applyWritable(updated, patch)
+  // Legacy rows may still have only `name`; any structured-name patch must end
+  // with a real firstName so we never persist a half-migrated row.
   if (touchesStructuredName) {
     const firstName = typeof updated.firstName === 'string' ? updated.firstName.trim() : ''
     if (!firstName) throw new ValidationError('Missing first name')
