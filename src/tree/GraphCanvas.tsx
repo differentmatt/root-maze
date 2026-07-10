@@ -211,6 +211,15 @@ export default function GraphCanvas({
     setView(mode === 'focus' ? focusView() : fitView())
   }, [mode, focusView, fitView])
 
+  // Also re-frame when entering or leaving fullscreen, so a graph the user had
+  // zoomed into doesn't open fullscreen still zoomed in (which pushes the
+  // content and controls out of sight). Separate effect keyed only on isFull so
+  // it doesn't clobber manual pan/zoom during normal viewing.
+  useEffect(() => {
+    setView(mode === 'focus' ? focusView() : fitView())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFull])
+
   // Map client (screen) coordinates to SVG user space via the <svg>'s own CTM,
   // which is independent of our pan/zoom transform — so deltas stay stable.
   const toUser = useCallback((clientX: number, clientY: number) => {
