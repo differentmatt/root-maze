@@ -151,7 +151,7 @@ function GroupWorkspace({
       {/* Group switcher (only meaningful with more than one) plus a compact way
           to start another group you own — the backend has always allowed it. */}
       <div className="flex items-center gap-2">
-        {groups.length > 1 && (
+        {groups.length > 1 ? (
           <div className="relative min-w-0 flex-1">
             <select
               aria-label="Switch group"
@@ -172,6 +172,11 @@ function GroupWorkspace({
               ▼
             </span>
           </div>
+        ) : (
+          // With a single group there's nothing to switch, so just name it.
+          <p className="min-w-0 flex-1 truncate text-lg font-medium">
+            {active.name}
+          </p>
         )}
         <button
           onClick={() => setCreatingGroup((v) => !v)}
