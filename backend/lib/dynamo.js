@@ -22,18 +22,19 @@ export async function getItem(key) {
 // clobbering an existing item). Returns true on success, false if the
 // condition failed.
 export async function putItem(item, condition) {
-  const options = typeof condition === 'string'
-    ? { ConditionExpression: condition }
-    : condition
-      ? {
-          ...(condition.conditionExpression
-            ? { ConditionExpression: condition.conditionExpression }
-            : {}),
-          ...(condition.expressionAttributeValues
-            ? { ExpressionAttributeValues: condition.expressionAttributeValues }
-            : {}),
-        }
-      : {}
+  let options = {}
+  if (typeof condition === 'string') {
+    options = { ConditionExpression: condition }
+  } else if (condition) {
+    options = {
+      ...(condition.conditionExpression
+        ? { ConditionExpression: condition.conditionExpression }
+        : {}),
+      ...(condition.expressionAttributeValues
+        ? { ExpressionAttributeValues: condition.expressionAttributeValues }
+        : {}),
+    }
+  }
   try {
     await client.send(
       new PutCommand({
