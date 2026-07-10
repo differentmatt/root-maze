@@ -147,8 +147,6 @@ export default function TreeView({ group }: { group: Group }) {
             meNodeId={myNodeId}
           />
 
-          <ViewHelp />
-
           <Legend />
 
           {/* Editing a person replaces the add-person form so the screen stays
@@ -195,19 +193,6 @@ function GraphLoading() {
       <span className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
       Loading family graph…
     </div>
-  )
-}
-
-// Explains the graph's two view modes. Lives below the graph (not overlaid on
-// it) so it doesn't crowd the canvas.
-function ViewHelp() {
-  return (
-    <p className="text-xs text-zinc-500">
-      <span className="text-zinc-300">Whole tree</span> shows everyone by
-      generation. <span className="text-zinc-300">Focus</span> zooms in on one
-      person and their close family — tap anyone to re-center. Drag to pan,
-      pinch or scroll to zoom.
-    </p>
   )
 }
 
