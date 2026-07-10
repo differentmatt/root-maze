@@ -255,6 +255,27 @@ Resources:
         ZipFile: |
           exports.handler = async () => ({ statusCode: 503, body: '{"error":"Not deployed yet"}' });
 
+  # Phase 3 — identity linking (account <-> person_node). Same backend bundle,
+  # different entrypoint (Handler field).
+  LinksFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-links'
+      Runtime: nodejs20.x
+      Architectures: [arm64]
+      Handler: handlers/links.handler
+      MemorySize: 256
+      Timeout: 10
+      ReservedConcurrentExecutions: 10
+      Role: !GetAtt ApiLambdaRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DataTable
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({ statusCode: 503, body: '{"error":"Not deployed yet"}' });
+
   InvitesFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -345,6 +366,14 @@ Resources:
       ApiId: !Ref Api
       IntegrationType: AWS_PROXY
       IntegrationUri: !GetAtt InvitesFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  LinksIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Api
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt LinksFunction.Arn
       PayloadFormatVersion: '2.0'
 
   MeGetRoute:
@@ -455,6 +484,22 @@ Resources:
       RouteKey: 'DELETE /api/groups/{groupId}/invites/{token}'
       Target: !Sub 'integrations/${InvitesIntegration}'
 
+  # Phase 3 identity-linking routes. {accountId} is the account being linked;
+  # the handler enforces self-service vs owner-only cross-linking.
+  MemberLinkPutRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'PUT /api/groups/{groupId}/members/{accountId}/link'
+      Target: !Sub 'integrations/${LinksIntegration}'
+
+  MemberLinkDeleteRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'DELETE /api/groups/{groupId}/members/{accountId}/link'
+      Target: !Sub 'integrations/${LinksIntegration}'
+
   # Token-addressed invite routes. The preview (GET) is intentionally public —
   # an invitee sees only the group name before signing in to accept.
   InvitePreviewRoute:
@@ -523,6 +568,14 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref InvitesFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
+
+  LinksFunctionApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LinksFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
@@ -698,5 +751,7 @@ Outputs:
     Value: !Ref MembersFunction
   InvitesFunctionName:
     Value: !Ref InvitesFunction
+  LinksFunctionName:
+    Value: !Ref LinksFunction
   DeployRoleArn:
     Value: !GetAtt DeployRole.Arn

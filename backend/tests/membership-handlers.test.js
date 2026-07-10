@@ -8,6 +8,7 @@ vi.mock('../lib/groups.js', () => ({
   removeMember: vi.fn(),
   changeMemberRole: vi.fn(),
 }))
+vi.mock('../lib/links.js', () => ({ linkedNodeMap: vi.fn() }))
 vi.mock('../lib/invites.js', () => ({
   createInvite: vi.fn(),
   listInvites: vi.fn(),
@@ -20,6 +21,7 @@ import { requireGroupMember } from '../lib/http.js'
 import { authenticate } from '../lib/auth.js'
 import { resolveAccount } from '../lib/accounts.js'
 import { listMembers, removeMember, changeMemberRole } from '../lib/groups.js'
+import { linkedNodeMap } from '../lib/links.js'
 import {
   createInvite,
   listInvites,
@@ -53,13 +55,23 @@ describe('members handler', () => {
     expect(res.statusCode).toBe(403)
   })
 
-  it('lists members with the caller marked', async () => {
+  it('lists members with the caller marked and linked person enriched', async () => {
     vi.mocked(requireGroupMember).mockResolvedValueOnce(member)
     vi.mocked(listMembers).mockResolvedValueOnce([{ accountId: 'acc_1', role: 'owner' }])
+    vi.mocked(linkedNodeMap).mockResolvedValueOnce({
+      acc_1: { nodeId: 'nod_1', name: 'Ada' },
+    })
     const res = await membersHandler(event({ method: 'GET', path: { groupId: 'g1' } }))
     expect(res.statusCode).toBe(200)
     expect(JSON.parse(res.body)).toEqual({
-      members: [{ accountId: 'acc_1', role: 'owner' }],
+      members: [
+        {
+          accountId: 'acc_1',
+          role: 'owner',
+          linkedNodeId: 'nod_1',
+          linkedNodeName: 'Ada',
+        },
+      ],
       me: 'acc_1',
     })
   })

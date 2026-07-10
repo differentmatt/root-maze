@@ -31,8 +31,11 @@ function toNode(item) {
 }
 
 // Fields a client may set on create or patch. Anything else in the body is
-// ignored — clients can't write PK/SK, timestamps, or deletedAt.
-const WRITABLE = ['name', 'birthdate', 'deathdate', 'notes', 'accountId']
+// ignored — clients can't write PK/SK, timestamps, or deletedAt. accountId is
+// deliberately NOT writable here: identity linking has its own integrity-checked
+// endpoint (see lib/links.js), so a plain node write can't bypass the
+// one-account-per-node / one-node-per-account rules.
+const WRITABLE = ['name', 'birthdate', 'deathdate', 'notes']
 
 function applyWritable(target, input) {
   for (const field of WRITABLE) {
@@ -67,7 +70,8 @@ export async function createNode(groupId, accountId, input) {
     birthdate: input.birthdate ?? null,
     deathdate: input.deathdate ?? null,
     notes: input.notes ?? null,
-    accountId: input.accountId ?? null,
+    // Nodes are always created unlinked; linking goes through lib/links.js.
+    accountId: null,
     createdAt: now,
     updatedAt: now,
     updatedBy: accountId,
