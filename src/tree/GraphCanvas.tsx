@@ -1,13 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PersonNode, Edge } from '../api'
-import { computeLayout } from './layout'
+import { computeLayout, neighborhood, type LayoutEdge } from './layout'
 import { labelFor } from './names'
 
+// The graph can be viewed two ways. 'tree' lays out the whole family by
+// generation; 'focus' shows just one person's nearby relatives, which keeps a
+// large tree legible on a small screen. The layout engine is the same for both
+// — 'focus' simply runs it over a bounded neighborhood.
+type ViewMode = 'tree' | 'focus'
+// How many relationship-hops out the focus view reaches from its center.
+const FOCUS_DEPTH = 3
+
+// The SVG's own coordinate viewport. It stays fixed so the on-screen element
+// keeps a stable size; the whole tree is fit into it via the pan/zoom
+// transform, however big the graph gets.
 const WIDTH = 600
 const HEIGHT = 460
-const MIN_K = 0.4
+// Default zoom-out floor for interactive pinch/scroll. A very large tree may
+// need to fit at a smaller scale than this; in that case the floor drops to
+// whatever fits (down to ABS_MIN_K) so the whole tree stays reachable.
+const MIN_K = 0.05
+const ABS_MIN_K = 0.02
 const MAX_K = 4
 const NODE_R = 18
+// Padding (in viewport units) around the tree when fit into view.
+const FIT_PAD = 32
 
 interface View {
   x: number
@@ -41,6 +58,10 @@ export default function GraphCanvas({
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 })
+  const [mode, setMode] = useState<ViewMode>('tree')
+  // Who the focus view centers on. Null until the user picks someone (or has a
+  // claimed "me" node), at which point it defaults sensibly below.
+  const [focusId, setFocusId] = useState<string | null>(null)
 
   // Active pointers, so we can tell a one-finger pan from a two-finger pinch.
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map())
@@ -50,32 +71,173 @@ export default function GraphCanvas({
   const pinchDist = useRef<number | null>(null)
   const moved = useRef(false)
 
-  // Recompute the layout only when the graph's shape changes, not on select.
+  const layoutEdges: LayoutEdge[] = useMemo(
+    () =>
+      edges.map((e) => ({
+        from: e.fromPerson,
+        to: e.toPerson,
+        kind: e.edgeKind,
+      })),
+    [edges],
+  )
+
+  // In focus mode, center on the user's pick, else their claimed node, else the
+  // first person — taking the first candidate that's actually present, so a
+  // stale (e.g. just-deleted) focus falls through instead of blanking focus.
+  const effectiveFocus =
+    [focusId, meNodeId, nodes[0]?.nodeId].find(
+      (id) => id != null && nodes.some((n) => n.nodeId === id),
+    ) ?? null
+
+  // The people (and edges between them) this view actually shows.
+  const visible = useMemo(() => {
+    if (mode !== 'focus' || !effectiveFocus) return null
+    return neighborhood(
+      nodes.map((n) => n.nodeId),
+      layoutEdges,
+      effectiveFocus,
+      FOCUS_DEPTH,
+    )
+  }, [mode, effectiveFocus, nodes, layoutEdges])
+
+  const shownNodes = useMemo(
+    () => (visible ? nodes.filter((n) => visible.has(n.nodeId)) : nodes),
+    [visible, nodes],
+  )
+  const shownEdges = useMemo(
+    () =>
+      visible
+        ? edges.filter(
+            (e) => visible.has(e.fromPerson) && visible.has(e.toPerson),
+          )
+        : edges,
+    [visible, edges],
+  )
+
+  // Recompute the layout only when the visible graph's shape changes, not on
+  // select. Mode and focus change which people are visible, so they're keyed in.
   const layoutKey = useMemo(
     () =>
-      nodes
+      mode +
+      '|' +
+      (effectiveFocus ?? '') +
+      '|' +
+      shownNodes
         .map((n) => n.nodeId)
         .sort()
         .join(',') +
       '|' +
-      edges
+      shownEdges
         .map((e) => `${e.fromPerson}>${e.toPerson}`)
         .sort()
         .join(','),
-    [nodes, edges],
+    [mode, effectiveFocus, shownNodes, shownEdges],
   )
 
-  const pos = useMemo(
+  const layout = useMemo(
     () =>
       computeLayout(
-        nodes.map((n) => n.nodeId),
-        edges.map((e) => ({ from: e.fromPerson, to: e.toPerson })),
-        WIDTH,
-        HEIGHT,
+        shownNodes.map((n) => n.nodeId),
+        shownEdges.map((e) => ({
+          from: e.fromPerson,
+          to: e.toPerson,
+          kind: e.edgeKind,
+        })),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [layoutKey],
   )
+  const pos = layout.pos
+
+  // The scale that fits the whole current layout, allowed below the interactive
+  // floor (down to ABS_MIN_K) so even a very wide/tall tree fits fully.
+  const wholeFitK = useMemo(() => {
+    const cw = layout.width
+    const ch = layout.height
+    if (cw <= 0 || ch <= 0) return 1
+    return Math.max(
+      ABS_MIN_K,
+      Math.min((WIDTH - 2 * FIT_PAD) / cw, (HEIGHT - 2 * FIT_PAD) / ch),
+    )
+  }, [layout.width, layout.height])
+
+  // Interactive zoom-out floor: normally MIN_K, but never above the scale that
+  // fits the whole tree, so the user can always reach a full view.
+  const minZoom = Math.min(MIN_K, wholeFitK)
+
+  // A view (pan/zoom) that fits a content box of size cw×ch, centered on the
+  // point (cx, cy), into the viewport — clamped to the zoom range.
+  const viewFitting = useCallback(
+    (cx: number, cy: number, cw: number, ch: number, maxK: number): View => {
+      const k = Math.min(
+        maxK,
+        Math.max(
+          minZoom,
+          Math.min(
+            (WIDTH - 2 * FIT_PAD) / Math.max(cw, 1),
+            (HEIGHT - 2 * FIT_PAD) / Math.max(ch, 1),
+          ),
+        ),
+      )
+      return { k, x: WIDTH / 2 - k * cx, y: HEIGHT / 2 - k * cy }
+    },
+    [minZoom],
+  )
+
+  // Fit the whole tree centered in the viewport.
+  const fitView = useCallback((): View => {
+    const cw = layout.width
+    const ch = layout.height
+    if (cw <= 0 || ch <= 0) return { x: 0, y: 0, k: 1 }
+    return viewFitting(cw / 2, ch / 2, cw, ch, MAX_K)
+  }, [layout.width, layout.height, viewFitting])
+
+  // Zoom in on the focus person and their immediate relatives. Unlike fitting
+  // the whole neighborhood (which, for a small family, is the entire tree and
+  // so looks like nothing happened), this always visibly re-centers on the
+  // chosen person — the point of the focus view.
+  const focusView = useCallback((): View => {
+    const c = effectiveFocus && pos[effectiveFocus]
+    if (!c) return fitView()
+    const near = new Set<string>([effectiveFocus!])
+    for (const e of shownEdges) {
+      if (e.fromPerson === effectiveFocus) near.add(e.toPerson)
+      if (e.toPerson === effectiveFocus) near.add(e.fromPerson)
+    }
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const id of near) {
+      const p = pos[id]
+      if (!p) continue
+      minX = Math.min(minX, p.x)
+      minY = Math.min(minY, p.y)
+      maxX = Math.max(maxX, p.x)
+      maxY = Math.max(maxY, p.y)
+    }
+    // Pad for node radius + labels, and keep a floor so a lone person doesn't
+    // zoom in absurdly far.
+    const cw = Math.max(maxX - minX + 4 * NODE_R, 260)
+    const ch = Math.max(maxY - minY + 4 * NODE_R, 220)
+    return viewFitting((minX + maxX) / 2, (minY + maxY) / 2, cw, ch, 1.4)
+  }, [effectiveFocus, pos, shownEdges, fitView, viewFitting])
+
+  // Re-frame the view whenever the mode, focus person, or graph shape changes:
+  // fit the whole tree in tree mode, zoom to the person in focus mode. Manual
+  // pan/zoom is preserved between these changes.
+  useEffect(() => {
+    setView(mode === 'focus' ? focusView() : fitView())
+  }, [mode, focusView, fitView])
+
+  // Also re-frame when entering or leaving fullscreen, so a graph the user had
+  // zoomed into doesn't open fullscreen still zoomed in (which pushes the
+  // content and controls out of sight). Separate effect keyed only on isFull so
+  // it doesn't clobber manual pan/zoom during normal viewing.
+  useEffect(() => {
+    setView(mode === 'focus' ? focusView() : fitView())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFull])
 
   // Map client (screen) coordinates to SVG user space via the <svg>'s own CTM,
   // which is independent of our pan/zoom transform — so deltas stay stable.
@@ -91,12 +253,12 @@ export default function GraphCanvas({
     (clientX: number, clientY: number, factor: number) => {
       const q = toUser(clientX, clientY)
       setView((v) => {
-        const k = Math.min(MAX_K, Math.max(MIN_K, v.k * factor))
+        const k = Math.min(MAX_K, Math.max(minZoom, v.k * factor))
         const f = k / v.k
         return { k, x: q.x - f * (q.x - v.x), y: q.y - f * (q.y - v.y) }
       })
     },
-    [toUser],
+    [toUser, minZoom],
   )
 
   // Wheel must be a non-passive native listener so preventDefault() can stop
@@ -175,9 +337,23 @@ export default function GraphCanvas({
     }
   }
 
-  // A tap only selects if the pointer didn't drag (which would be a pan).
+  // Activate a person: select them and, in focus mode, re-center the view on
+  // them so the graph becomes a way to walk the family one relative at a time.
+  // Shared by pointer taps and keyboard (Enter/Space) so both can navigate.
+  function activate(nodeId: string) {
+    if (mode === 'focus') setFocusId(nodeId)
+    onSelect(nodeId)
+  }
+
+  // A tap only activates if the pointer didn't drag (which would be a pan).
   function selectIfTap(nodeId: string) {
-    if (!moved.current) onSelect(nodeId)
+    if (!moved.current) activate(nodeId)
+  }
+
+  // Enter focus mode centered on the current selection (or the "me" node).
+  function enterFocus() {
+    setFocusId(selectedId ?? meNodeId ?? null)
+    setMode('focus')
   }
 
   if (nodes.length === 0) {
@@ -225,7 +401,7 @@ export default function GraphCanvas({
         </defs>
 
         <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-          {edges.map((e) => {
+          {shownEdges.map((e) => {
             const a = pos[e.fromPerson]
             const b = pos[e.toPerson]
             if (!a || !b) return null
@@ -255,13 +431,14 @@ export default function GraphCanvas({
             )
           })}
 
-          {nodes.map((n) => {
+          {shownNodes.map((n) => {
             const p = pos[n.nodeId]
             if (!p) return null
             const selected = n.nodeId === selectedId
             const isMe = meNodeId != null && n.nodeId === meNodeId
+            const isFocus = mode === 'focus' && n.nodeId === effectiveFocus
             const linked = Boolean(n.accountId)
-            const label = labelFor(n, nodes)
+            const label = labelFor(n, shownNodes)
             const ariaName = n.name || label
             return (
               <g
@@ -271,7 +448,7 @@ export default function GraphCanvas({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault()
-                    onSelect(n.nodeId)
+                    activate(n.nodeId)
                   }
                 }}
                 tabIndex={0}
@@ -286,6 +463,17 @@ export default function GraphCanvas({
                     r={NODE_R + 4}
                     fill="none"
                     stroke="#34d399"
+                    strokeWidth={2}
+                  />
+                )}
+                {/* Amber ring marks the person the focus view is centered on.
+                    When that's also the emerald "me" node, it sits just outside
+                    so both stay visible. */}
+                {isFocus && (
+                  <circle
+                    r={isMe ? NODE_R + 7 : NODE_R + 4}
+                    fill="none"
+                    stroke="#fbbf24"
                     strokeWidth={2}
                   />
                 )}
@@ -313,11 +501,21 @@ export default function GraphCanvas({
         </g>
       </svg>
 
+      <div
+        role="group"
+        aria-label="Graph view"
+        className="absolute left-2 top-2 flex overflow-hidden rounded-md border border-zinc-700 bg-zinc-900/90 text-xs"
+      >
+        <ModeButton active={mode === 'tree'} onClick={() => setMode('tree')}>
+          Whole tree
+        </ModeButton>
+        <ModeButton active={mode === 'focus'} onClick={enterFocus}>
+          Focus
+        </ModeButton>
+      </div>
+
       <div className="absolute right-2 top-2 flex flex-col gap-1">
-        <ControlButton
-          label="Reset view"
-          onClick={() => setView({ x: 0, y: 0, k: 1 })}
-        >
+        <ControlButton label="Fit to view" onClick={() => setView(fitView())}>
           ⌾
         </ControlButton>
         <ControlButton
@@ -346,6 +544,32 @@ function ControlButton({
       aria-label={label}
       onClick={onClick}
       className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700 bg-zinc-900/90 text-lg text-zinc-300 hover:bg-zinc-800"
+    >
+      {children}
+    </button>
+  )
+}
+
+// One segment of the whole-tree / focus toggle.
+function ModeButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`px-2.5 py-1 ${
+        active
+          ? 'bg-zinc-200 text-zinc-900'
+          : 'text-zinc-300 hover:bg-zinc-800'
+      }`}
     >
       {children}
     </button>

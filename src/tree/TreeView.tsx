@@ -68,6 +68,7 @@ export default function TreeView({ group }: { group: Group }) {
   const [status, setStatus] = useState<Status>({ state: 'loading' })
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isFull, setIsFull] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
 
   const reload = useCallback(async () => {
     try {
@@ -116,11 +117,6 @@ export default function TreeView({ group }: { group: Group }) {
 
   return (
     <section className="flex flex-col gap-5">
-      <div>
-        <p className="text-xs uppercase tracking-wide text-zinc-500">Group</p>
-        <p className="text-lg font-medium">{group.name}</p>
-      </div>
-
       {status.state === 'loading' && <GraphLoading />}
 
       {status.state === 'error' && (
@@ -147,7 +143,19 @@ export default function TreeView({ group }: { group: Group }) {
             meNodeId={myNodeId}
           />
 
-          <Legend />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setShowHelp(true)}
+              className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300"
+            >
+              <span className="flex h-4 w-4 items-center justify-center rounded-full border border-zinc-600 text-[10px]">
+                ?
+              </span>
+              Help &amp; legend
+            </button>
+          </div>
+          {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
 
           {/* Editing a person replaces the add-person form so the screen stays
               focused on that person. */}
@@ -168,18 +176,13 @@ export default function TreeView({ group }: { group: Group }) {
               onClose={() => setSelectedId(null)}
             />
           ) : (
-            <>
-              <p className="text-sm text-zinc-500">
-                Tap a person in the graph to edit them or add relationships.
-              </p>
-              <AddPersonForm
-                groupId={group.groupId}
-                onAdded={(newId) => {
-                  setSelectedId(newId)
-                  reload()
-                }}
-              />
-            </>
+            <AddPersonForm
+              groupId={group.groupId}
+              onAdded={(newId) => {
+                setSelectedId(newId)
+                reload()
+              }}
+            />
           )}
         </>
       )}
@@ -192,6 +195,76 @@ function GraphLoading() {
     <div className="flex h-64 flex-col items-center justify-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 text-sm text-zinc-500">
       <span className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
       Loading family graph…
+    </div>
+  )
+}
+
+// All graph help — view modes, gestures, and the marker legend — behind one
+// dismissible overlay, so the tree screen itself stays uncluttered.
+function HelpOverlay({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Graph help"
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-base font-medium text-zinc-100">Graph help</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close help"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-lg text-zinc-400 hover:bg-zinc-800"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="space-y-4 text-sm text-zinc-300">
+          <section>
+            <h3 className="mb-1 text-xs uppercase tracking-wide text-zinc-500">
+              Views
+            </h3>
+            <p>
+              <span className="text-zinc-100">Whole tree</span> — everyone, laid
+              out by generation.
+            </p>
+            <p>
+              <span className="text-zinc-100">Focus</span> — zoom in on one
+              person and their close family; tap anyone to re-center on them.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="mb-1 text-xs uppercase tracking-wide text-zinc-500">
+              Getting around
+            </h3>
+            <p>
+              Drag to pan · pinch or scroll to zoom · ⌾ re-fits · ⤢ goes
+              fullscreen · tap a person to edit them or add relationships.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+              Legend
+            </h3>
+            <Legend />
+          </section>
+        </div>
+      </div>
     </div>
   )
 }
@@ -212,6 +285,10 @@ function Legend() {
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-3 w-3 rounded-full border-2 border-emerald-400" />{' '}
         you
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-3 rounded-full border-2 border-amber-400" />{' '}
+        focused on
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" /> claimed by a
