@@ -72,15 +72,13 @@ export default function App() {
   }
 
   // Re-fetch /me after a group change (e.g. a rename) so the switcher and titles
-  // pick up the new name, without disturbing the active selection.
+  // pick up the new name, without disturbing the active selection. Errors are
+  // intentionally left to propagate: the rename itself already succeeded, so the
+  // caller (RenameGroupForm) surfaces the refresh failure inline rather than us
+  // tearing down the whole workspace over a stale display name.
   async function refreshMe() {
-    try {
-      const me = await getMe()
-      setLoad({ status: 'ready', me })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Refresh failed'
-      setLoad({ status: 'error', message })
-    }
+    const me = await getMe()
+    setLoad({ status: 'ready', me })
   }
 
   if (inviteToken) {

@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 
 // A searchable person picker — a combobox that replaces long native <select>
 // lists (which get unwieldy once a family tree has more than a handful of
 // people). Shows the current selection as a button; opening it reveals a filter
-// box and a scrollable, filtered list. Mobile-first and dark-themed to match the
-// rest of the app.
+// box and a scrollable, filtered listbox. Mobile-first and dark-themed to match
+// the rest of the app.
+//
+// Accessibility: the filter input is the combobox (aria-controls the listbox,
+// aria-activedescendant tracks the highlighted option); each option element is
+// itself the interactive target and carries aria-selected, so pointer and
+// screen-reader users act on the same element. Arrow keys move `active` and the
+// highlighted option is scrolled into view.
 
 export interface PickerOption {
   id: string
@@ -40,6 +46,10 @@ export default function PersonPicker({
   const [active, setActive] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  const baseId = useId()
+  const listId = `${baseId}-listbox`
+  const optionId = (i: number) => `${baseId}-opt-${i}`
 
   const selected = options.find((o) => o.id === value) ?? null
 
@@ -69,6 +79,17 @@ export default function PersonPicker({
   useEffect(() => {
     if (active >= rows.length) setActive(Math.max(0, rows.length - 1))
   }, [rows.length, active])
+
+  // Keep the highlighted option visible even when the list scrolls past its
+  // max height — otherwise arrowing down would select a row you can't see.
+  useEffect(() => {
+    if (!open) return
+    const el = listRef.current?.querySelector<HTMLElement>(
+      `[data-index="${active}"]`,
+    )
+    // Optional-call: jsdom (tests) and some older engines don't implement it.
+    el?.scrollIntoView?.({ block: 'nearest' })
+  }, [active, open])
 
   // Close on click outside or Escape.
   useEffect(() => {
@@ -135,35 +156,55 @@ export default function PersonPicker({
                 setActive(0)
               }}
               onKeyDown={onKeyDown}
+              role="combobox"
+              aria-expanded
+              aria-controls={listId}
+              aria-autocomplete="list"
+              aria-activedescendant={
+                rows.length > 0 ? optionId(active) : undefined
+              }
               placeholder="Type to filter…"
               className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
             />
           </div>
-          <ul role="listbox" className="max-h-52 overflow-y-auto py-1">
+          <ul
+            ref={listRef}
+            id={listId}
+            role="listbox"
+            aria-label={ariaLabel}
+            className="max-h-52 overflow-y-auto py-1"
+          >
             {rows.length === 0 ? (
               <li className="px-3 py-2 text-sm text-zinc-500">No matches</li>
             ) : (
               rows.map((row, i) => {
                 const isActive = i === active
                 const isSelected =
-                  row.id === value || (row.id === null && value == null && !!clearLabel)
+                  row.id === value ||
+                  (row.id === null && value == null && !!clearLabel)
                 return (
-                  <li key={row.id ?? '__clear__'} role="option" aria-selected={isSelected}>
-                    <button
-                      type="button"
-                      onMouseEnter={() => setActive(i)}
-                      onClick={() => choose(row.id)}
-                      className={`flex w-full flex-col items-start px-3 py-2 text-left text-sm ${
-                        isActive ? 'bg-zinc-800' : ''
-                      } ${row.id === null ? 'text-zinc-400' : 'text-zinc-100'}`}
-                    >
-                      <span className="w-full truncate">{row.label}</span>
-                      {row.hint && (
-                        <span className="w-full truncate text-xs text-zinc-500">
-                          {row.hint}
-                        </span>
-                      )}
-                    </button>
+                  // The option element is itself the click target — no nested
+                  // button — so aria-selected sits on what the user interacts
+                  // with. Keyboard activation goes through the combobox input's
+                  // onKeyDown + aria-activedescendant above.
+                  <li
+                    key={row.id ?? '__clear__'}
+                    id={optionId(i)}
+                    data-index={i}
+                    role="option"
+                    aria-selected={isSelected}
+                    onMouseEnter={() => setActive(i)}
+                    onClick={() => choose(row.id)}
+                    className={`flex cursor-pointer flex-col items-start px-3 py-2 text-sm ${
+                      isActive ? 'bg-zinc-800' : ''
+                    } ${row.id === null ? 'text-zinc-400' : 'text-zinc-100'}`}
+                  >
+                    <span className="w-full truncate">{row.label}</span>
+                    {row.hint && (
+                      <span className="w-full truncate text-xs text-zinc-500">
+                        {row.hint}
+                      </span>
+                    )}
                   </li>
                 )
               })

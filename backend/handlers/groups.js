@@ -27,7 +27,7 @@ async function create(event) {
   const user = await authenticate(event)
   if (!user) return unauthorized()
 
-  const body = JSON.parse(event.body || '{}')
+  const body = parseBody(event.body)
   const name = typeof body.name === 'string' ? body.name.trim() : ''
   if (!name) return badRequest('Missing group name')
   if (name.length > 100) return badRequest('Group name too long')
@@ -45,9 +45,20 @@ async function rename(event) {
   const { response, account } = await requireGroupMember(event, groupId)
   if (response) return response
 
-  const body = JSON.parse(event.body || '{}')
+  const body = parseBody(event.body)
   const result = await renameGroup(groupId, account.accountId, body.name)
   if (result === 'not_found') return notFound('Group not found')
 
   return ok({ groupId: result.groupId, name: result.name })
+}
+
+// Malformed JSON is invalid client input, not a server fault — parse
+// defensively (mirroring the other group-scoped handlers) so a bad body falls
+// through to the same 400 validation as a missing name rather than a 500.
+function parseBody(raw) {
+  try {
+    return JSON.parse(raw || '{}')
+  } catch {
+    return {}
+  }
 }

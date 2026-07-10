@@ -77,6 +77,16 @@ describe('POST /api/groups', () => {
     expect(res.statusCode).toBe(200)
     expect(vi.mocked(createGroup)).toHaveBeenCalledWith('acc_1', 'Fam')
   })
+
+  it('400s (not 500s) on a malformed JSON body', async () => {
+    vi.mocked(authenticate).mockResolvedValueOnce({ sub: 'g1' })
+    const res = await groupsHandler({
+      headers: { authorization: 'Bearer x' },
+      requestContext: { http: { method: 'POST' } },
+      body: '{ not json',
+    })
+    expect(res.statusCode).toBe(400)
+  })
 })
 
 describe('PATCH /api/groups/{groupId}', () => {
