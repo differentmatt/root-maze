@@ -19,8 +19,13 @@ function nodeKey(groupId, nodeId) {
   return { PK: `GROUP#${groupId}`, SK: `NODE#${nodeId}` }
 }
 
-// Trim a client-supplied optional string down to a value or null. Blank/whitespace
-// and non-strings collapse to null so we never store "" for an absent name part.
+/**
+ * Trim a client-supplied optional string down to a value or null.
+ * Blank/whitespace and non-strings collapse to null so we never store ""
+ * for an absent name part.
+ * @param {unknown} v
+ * @returns {string | null}
+ */
 function cleanOpt(v) {
   if (typeof v !== 'string') return null
   const t = v.trim()

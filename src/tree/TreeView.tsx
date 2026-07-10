@@ -430,6 +430,61 @@ function AddPersonForm({
   )
 }
 
+function buildPersonPatch({
+  firstName,
+  lastName,
+  middleName,
+  birthName,
+  birthdate,
+  deathdate,
+  notes,
+  saved,
+  isLegacyName,
+}: {
+  firstName: string
+  lastName: string
+  middleName: string
+  birthName: string
+  birthdate: string
+  deathdate: string
+  notes: string
+  saved: {
+    firstName: string
+    lastName: string
+    middleName: string
+    birthName: string
+    birthdate: string
+    deathdate: string
+    notes: string
+  }
+  isLegacyName: boolean
+}): Parameters<typeof updateNode>[2] {
+  const patch: Parameters<typeof updateNode>[2] = {}
+  const nextFirstName = firstName.trim()
+  const structuredDirty =
+    firstName !== saved.firstName ||
+    lastName !== saved.lastName ||
+    middleName !== saved.middleName ||
+    birthName !== saved.birthName
+
+  if (firstName !== saved.firstName) patch.firstName = nextFirstName
+  if (lastName !== saved.lastName) patch.lastName = lastName.trim() || null
+  if (middleName !== saved.middleName) patch.middleName = middleName.trim() || null
+  if (birthName !== saved.birthName) patch.birthName = birthName.trim() || null
+  if (birthdate !== saved.birthdate) patch.birthdate = birthdate.trim() || null
+  if (deathdate !== saved.deathdate) patch.deathdate = deathdate.trim() || null
+  if (notes !== saved.notes) patch.notes = notes.trim() || null
+
+  // Legacy rows still store only `name`; when a user edits one structured
+  // part, include firstName too so the backend doesn't receive a partial
+  // migration like only lastName/birthName.
+  if (structuredDirty && isLegacyName && patch.firstName === undefined) {
+    patch.firstName = nextFirstName
+  }
+
+  return patch
+}
+
 function PersonPanel({
   groupId,
   person,
@@ -522,40 +577,19 @@ function PersonPanel({
     const t = setTimeout(async () => {
       setSave({ state: 'saving' })
       try {
-        const patch: Parameters<typeof updateNode>[2] = {}
-        const nextFirstName = firstName.trim()
-        const structuredDirty =
-          firstName !== saved.current.firstName ||
-          lastName !== saved.current.lastName ||
-          middleName !== saved.current.middleName ||
-          birthName !== saved.current.birthName
-
-        if (firstName !== saved.current.firstName) patch.firstName = nextFirstName
-        if (lastName !== saved.current.lastName) patch.lastName = lastName.trim() || null
-        if (middleName !== saved.current.middleName) {
-          patch.middleName = middleName.trim() || null
-        }
-        if (birthName !== saved.current.birthName) {
-          patch.birthName = birthName.trim() || null
-        }
-        if (birthdate !== saved.current.birthdate) {
-          patch.birthdate = birthdate.trim() || null
-        }
-        if (deathdate !== saved.current.deathdate) {
-          patch.deathdate = deathdate.trim() || null
-        }
-        if (notes !== saved.current.notes) patch.notes = notes.trim() || null
-
-        // Legacy rows still store only `name`; when a user edits one structured
-        // part, include firstName too so the backend doesn't receive a partial
-        // migration like only lastName/birthName.
-        if (structuredDirty && isLegacyName && patch.firstName === undefined) {
-          patch.firstName = nextFirstName
-        }
-
-        await updateNode(groupId, person.nodeId, {
-          ...patch,
+        const patch = buildPersonPatch({
+          firstName,
+          lastName,
+          middleName,
+          birthName,
+          birthdate,
+          deathdate,
+          notes,
+          saved: saved.current,
+          isLegacyName,
         })
+
+        await updateNode(groupId, person.nodeId, patch)
         saved.current = {
           firstName,
           lastName,
