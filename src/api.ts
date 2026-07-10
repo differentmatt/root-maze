@@ -63,7 +63,14 @@ export function createGroup(name: string): Promise<Group> {
 export interface PersonNode {
   nodeId: string
   groupId: string
+  // Derived full name ("First Middle Last"), always present — legacy rows that
+  // predate structured names resolve to their original single string here.
   name: string
+  firstName: string | null
+  lastName: string | null
+  middleName: string | null
+  // Name at birth / former name, surfaced as "née …" in the UI.
+  maidenName: string | null
   birthdate: string | null
   deathdate: string | null
   notes: string | null
@@ -102,7 +109,10 @@ export const SUBTYPES: Record<EdgeKind, string[]> = {
 }
 
 export interface NodeInput {
-  name?: string
+  firstName?: string
+  lastName?: string | null
+  middleName?: string | null
+  maidenName?: string | null
   birthdate?: string | null
   deathdate?: string | null
   notes?: string | null

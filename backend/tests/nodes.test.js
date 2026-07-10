@@ -55,16 +55,17 @@ describe('getNode', () => {
 })
 
 describe('createNode', () => {
-  it('requires a name', async () => {
-    await expect(createNode('g1', 'acc_1', { name: '   ' })).rejects.toBeInstanceOf(
-      ValidationError,
-    )
+  it('requires a first name', async () => {
+    await expect(
+      createNode('g1', 'acc_1', { firstName: '   ' }),
+    ).rejects.toBeInstanceOf(ValidationError)
     expect(putItem).not.toHaveBeenCalled()
   })
 
   it('writes a node row with defaults and logs the create', async () => {
-    const node = await createNode('g1', 'acc_1', { name: '  Ada  ' })
+    const node = await createNode('g1', 'acc_1', { firstName: '  Ada  ' })
 
+    expect(node.firstName).toBe('Ada')
     expect(node.name).toBe('Ada')
     expect(node.nodeId).toMatch(/^nod_/)
     expect(node.accountId).toBeNull()
@@ -80,8 +81,38 @@ describe('createNode', () => {
     )
   })
 
+  it('stores the structured name parts and derives the full name', async () => {
+    const node = await createNode('g1', 'acc_1', {
+      firstName: '  Ada  ',
+      middleName: ' Byron ',
+      lastName: ' King ',
+      maidenName: ' Byron ',
+    })
+
+    expect(node.firstName).toBe('Ada')
+    expect(node.middleName).toBe('Byron')
+    expect(node.lastName).toBe('King')
+    expect(node.maidenName).toBe('Byron')
+    // name is the derived full name (maiden is surfaced as "née", not here).
+    expect(node.name).toBe('Ada Byron King')
+  })
+
+  it('collapses blank optional name parts to null', async () => {
+    const node = await createNode('g1', 'acc_1', {
+      firstName: 'Bo',
+      lastName: '   ',
+      maidenName: '',
+    })
+    expect(node.lastName).toBeNull()
+    expect(node.maidenName).toBeNull()
+    expect(node.name).toBe('Bo')
+  })
+
   it('ignores accountId on create — linking has its own endpoint', async () => {
-    const node = await createNode('g1', 'acc_1', { name: 'Bo', accountId: 'acc_9' })
+    const node = await createNode('g1', 'acc_1', {
+      firstName: 'Bo',
+      accountId: 'acc_9',
+    })
     expect(node.accountId).toBeNull()
   })
 })
@@ -89,22 +120,41 @@ describe('createNode', () => {
 describe('updateNode', () => {
   it('returns null when the node is gone', async () => {
     vi.mocked(getItem).mockResolvedValueOnce(null)
-    expect(await updateNode('g1', 'acc_1', 'nod_x', { name: 'X' })).toBeNull()
+    expect(await updateNode('g1', 'acc_1', 'nod_x', { firstName: 'X' })).toBeNull()
   })
 
-  it('rejects blanking the name', async () => {
+  it('rejects blanking the first name', async () => {
     vi.mocked(getItem).mockResolvedValueOnce({
-      nodeId: 'nod_1', groupId: 'g1', name: 'Ada', deletedAt: null,
+      nodeId: 'nod_1', groupId: 'g1', firstName: 'Ada', deletedAt: null,
     })
     await expect(
-      updateNode('g1', 'acc_1', 'nod_1', { name: '  ' }),
+      updateNode('g1', 'acc_1', 'nod_1', { firstName: '  ' }),
     ).rejects.toBeInstanceOf(ValidationError)
+  })
+
+  it('migrates a legacy row in place when its name parts are edited', async () => {
+    // Legacy row: only `name`, no structured parts. Editing writes the parts and
+    // the derived full name follows.
+    vi.mocked(getItem).mockResolvedValueOnce({
+      PK: 'GROUP#g1', SK: 'NODE#nod_1',
+      nodeId: 'nod_1', groupId: 'g1', name: 'Ada', deletedAt: null,
+      createdAt: 't0', updatedAt: 't0', updatedBy: 'acc_0',
+    })
+
+    const node = await updateNode('g1', 'acc_1', 'nod_1', {
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+    })
+
+    expect(node.firstName).toBe('Ada')
+    expect(node.lastName).toBe('Lovelace')
+    expect(node.name).toBe('Ada Lovelace')
   })
 
   it('applies only writable fields and stamps updatedBy', async () => {
     vi.mocked(getItem).mockResolvedValueOnce({
       PK: 'GROUP#g1', SK: 'NODE#nod_1',
-      nodeId: 'nod_1', groupId: 'g1', name: 'Ada', birthdate: null,
+      nodeId: 'nod_1', groupId: 'g1', firstName: 'Ada', birthdate: null,
       createdAt: 't0', updatedAt: 't0', updatedBy: 'acc_0', deletedAt: null,
     })
 

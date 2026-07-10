@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PersonNode, Edge } from '../api'
 import { computeLayout } from './layout'
+import { labelFor } from './names'
 
 const WIDTH = 600
 const HEIGHT = 460
@@ -260,6 +261,7 @@ export default function GraphCanvas({
             const selected = n.nodeId === selectedId
             const isMe = meNodeId != null && n.nodeId === meNodeId
             const linked = Boolean(n.accountId)
+            const label = labelFor(n, nodes)
             return (
               <g
                 key={n.nodeId}
@@ -273,7 +275,7 @@ export default function GraphCanvas({
                 }}
                 tabIndex={0}
                 role="button"
-                aria-label={isMe ? `${n.name} (you)` : n.name}
+                aria-label={isMe ? `${label} (you)` : label}
                 aria-pressed={selected}
                 className="cursor-pointer"
               >
@@ -302,7 +304,7 @@ export default function GraphCanvas({
                   fontSize={13}
                   fill={selected ? '#f4f4f5' : '#d4d4d8'}
                 >
-                  {n.name}
+                  {label}
                 </text>
               </g>
             )

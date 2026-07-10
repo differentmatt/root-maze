@@ -8,18 +8,49 @@ import { ValidationError } from './errors.js'
 // people. Every row carries updatedAt/updatedBy and a soft-delete deletedAt;
 // accountId is nullable so a person can exist in the tree before (or without)
 // ever signing in.
+//
+// Names are structured: firstName (required) plus optional lastName, middleName,
+// and maidenName (name at birth / former name). Legacy rows predate this and
+// carry only a single `name` string; nodeFullName below tolerates both, so no
+// data migration is needed — a legacy person keeps rendering, and picks up the
+// structured fields the next time someone edits them.
 
 function nodeKey(groupId, nodeId) {
   return { PK: `GROUP#${groupId}`, SK: `NODE#${nodeId}` }
 }
 
+// Trim a client-supplied optional string down to a value or null. Blank/whitespace
+// and non-strings collapse to null so we never store "" for an absent name part.
+function cleanOpt(v) {
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  return t || null
+}
+
+// Canonical full name derived from the structured parts, e.g. "Ada Byron King".
+// Falls back to a legacy row's single `name` string when no parts are present,
+// so both old and new rows resolve to something displayable.
+export function nodeFullName(item) {
+  const parts = [item.firstName, item.middleName, item.lastName]
+    .map((p) => (typeof p === 'string' ? p.trim() : ''))
+    .filter(Boolean)
+  if (parts.length) return parts.join(' ')
+  return typeof item.name === 'string' ? item.name : ''
+}
+
 // Project a stored row down to the public shape the API returns — no PK/SK or
-// soft-delete bookkeeping leaks to the client.
+// soft-delete bookkeeping leaks to the client. `name` is always the derived full
+// name so existing clients keep working; the parts let a richer UI render
+// "First L." and "née …" without re-parsing.
 function toNode(item) {
   return {
     nodeId: item.nodeId,
     groupId: item.groupId,
-    name: item.name,
+    name: nodeFullName(item),
+    firstName: item.firstName ?? null,
+    lastName: item.lastName ?? null,
+    middleName: item.middleName ?? null,
+    maidenName: item.maidenName ?? null,
     birthdate: item.birthdate ?? null,
     deathdate: item.deathdate ?? null,
     notes: item.notes ?? null,
@@ -30,15 +61,21 @@ function toNode(item) {
   }
 }
 
-// Fields a client may set on create or patch. Anything else in the body is
+// Optional fields a client may set on create or patch. firstName is handled
+// separately because it's required and validated. Anything else in the body is
 // ignored — clients can't write PK/SK, timestamps, or deletedAt. accountId is
 // deliberately NOT writable here: identity linking has its own integrity-checked
 // endpoint (see lib/links.js), so a plain node write can't bypass the
 // one-account-per-node / one-node-per-account rules.
-const WRITABLE = ['name', 'birthdate', 'deathdate', 'notes']
+const OPTIONAL_NAME_PARTS = ['lastName', 'middleName', 'maidenName']
+const PLAIN_WRITABLE = ['birthdate', 'deathdate', 'notes']
 
 function applyWritable(target, input) {
-  for (const field of WRITABLE) {
+  if (input.firstName !== undefined) target.firstName = input.firstName.trim()
+  for (const field of OPTIONAL_NAME_PARTS) {
+    if (input[field] !== undefined) target[field] = cleanOpt(input[field])
+  }
+  for (const field of PLAIN_WRITABLE) {
     if (input[field] !== undefined) target[field] = input[field]
   }
 }
@@ -56,8 +93,8 @@ export async function getNode(groupId, nodeId) {
 }
 
 export async function createNode(groupId, accountId, input) {
-  const name = typeof input.name === 'string' ? input.name.trim() : ''
-  if (!name) throw new ValidationError('Missing person name')
+  const firstName = typeof input.firstName === 'string' ? input.firstName.trim() : ''
+  if (!firstName) throw new ValidationError('Missing first name')
 
   const nodeId = newNodeId()
   const now = new Date().toISOString()
@@ -66,7 +103,10 @@ export async function createNode(groupId, accountId, input) {
     ...nodeKey(groupId, nodeId),
     nodeId,
     groupId,
-    name,
+    firstName,
+    lastName: cleanOpt(input.lastName),
+    middleName: cleanOpt(input.middleName),
+    maidenName: cleanOpt(input.maidenName),
     birthdate: input.birthdate ?? null,
     deathdate: input.deathdate ?? null,
     notes: input.notes ?? null,
@@ -88,10 +128,10 @@ export async function updateNode(groupId, accountId, nodeId, patch) {
   const existing = await getItem(nodeKey(groupId, nodeId))
   if (!existing || existing.deletedAt) return null
 
-  if (patch.name !== undefined) {
-    const name = typeof patch.name === 'string' ? patch.name.trim() : ''
-    if (!name) throw new ValidationError('Person name cannot be empty')
-    patch = { ...patch, name }
+  if (patch.firstName !== undefined) {
+    const firstName = typeof patch.firstName === 'string' ? patch.firstName.trim() : ''
+    if (!firstName) throw new ValidationError('First name cannot be empty')
+    patch = { ...patch, firstName }
   }
 
   const before = toNode(existing)

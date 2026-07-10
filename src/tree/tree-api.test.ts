@@ -40,11 +40,11 @@ describe('tree api', () => {
       .mockResolvedValue(jsonResponse({ nodeId: 'nod_1', name: 'Ada' }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await createNode('grp_1', { name: 'Ada', birthdate: '1815' })
+    await createNode('grp_1', { firstName: 'Ada', birthdate: '1815' })
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/groups/grp_1/nodes')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body)).toEqual({ name: 'Ada', birthdate: '1815' })
+    expect(JSON.parse(init.body)).toEqual({ firstName: 'Ada', birthdate: '1815' })
   })
 
   it('patches a person via PATCH /nodes/:id', async () => {
@@ -53,7 +53,7 @@ describe('tree api', () => {
       .mockResolvedValue(jsonResponse({ nodeId: 'nod_1', name: 'Ada L.' }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await updateNode('grp_1', 'nod_1', { name: 'Ada L.' })
+    await updateNode('grp_1', 'nod_1', { lastName: 'Lovelace' })
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/groups/grp_1/nodes/nod_1')
     expect(init.method).toBe('PATCH')

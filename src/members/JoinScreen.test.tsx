@@ -14,10 +14,15 @@ vi.mock('../api', async (importOriginal) => ({
 import { previewInvite, acceptInvite, getMe, getGraph, linkPersonNode } from '../api'
 
 function person(nodeId: string, name: string, accountId: string | null = null) {
+  const [firstName, ...rest] = name.split(' ')
   return {
     nodeId,
     groupId: 'grp_1',
     name,
+    firstName,
+    lastName: rest.join(' ') || null,
+    middleName: null,
+    maidenName: null,
     birthdate: null,
     deathdate: null,
     notes: null,
