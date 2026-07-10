@@ -176,18 +176,13 @@ export default function TreeView({ group }: { group: Group }) {
               onClose={() => setSelectedId(null)}
             />
           ) : (
-            <>
-              <p className="text-sm text-zinc-500">
-                Tap a person in the graph to edit them or add relationships.
-              </p>
-              <AddPersonForm
-                groupId={group.groupId}
-                onAdded={(newId) => {
-                  setSelectedId(newId)
-                  reload()
-                }}
-              />
-            </>
+            <AddPersonForm
+              groupId={group.groupId}
+              onAdded={(newId) => {
+                setSelectedId(newId)
+                reload()
+              }}
+            />
           )}
         </>
       )}
@@ -258,7 +253,7 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
             </h3>
             <p>
               Drag to pan · pinch or scroll to zoom · ⌾ re-fits · ⤢ goes
-              fullscreen · tap a person to edit them.
+              fullscreen · tap a person to edit them or add relationships.
             </p>
           </section>
 
