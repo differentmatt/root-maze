@@ -191,6 +191,46 @@ export function computeLayout(
   }
 }
 
+// The set of people within `depth` relationship-hops of `focusId` — the focus
+// person plus their partners, parents, children, and outward from there. Used
+// by the focus/ego view to show one person's local family instead of the whole
+// tree, which is what keeps a hundred-plus-person graph readable on a phone.
+// Falls back to every node when the focus person isn't present.
+export function neighborhood(
+  nodeIds: string[],
+  edges: LayoutEdge[],
+  focusId: string,
+  depth: number,
+): Set<string> {
+  const all = new Set(nodeIds)
+  if (!all.has(focusId)) return all
+
+  const adj = new Map<string, string[]>()
+  for (const id of nodeIds) adj.set(id, [])
+  for (const e of edges) {
+    if (adj.has(e.from) && adj.has(e.to) && e.from !== e.to) {
+      adj.get(e.from)!.push(e.to)
+      adj.get(e.to)!.push(e.from)
+    }
+  }
+
+  const seen = new Set<string>([focusId])
+  let frontier = [focusId]
+  for (let d = 0; d < depth && frontier.length; d++) {
+    const next: string[] = []
+    for (const id of frontier) {
+      for (const nb of adj.get(id)!) {
+        if (!seen.has(nb)) {
+          seen.add(nb)
+          next.push(nb)
+        }
+      }
+    }
+    frontier = next
+  }
+  return seen
+}
+
 // Union-find over both edge kinds, returning a component id per node.
 function componentsOf(
   nodeIds: string[],

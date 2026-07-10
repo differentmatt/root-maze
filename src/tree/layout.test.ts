@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeLayout, type LayoutEdge } from './layout'
+import { computeLayout, neighborhood, type LayoutEdge } from './layout'
 
 const pc = (from: string, to: string): LayoutEdge => ({
   from,
@@ -127,6 +127,55 @@ describe('computeLayout', () => {
       [pc('a', 'b'), pc('x', 'y')],
     )
     // The two families should not sit on top of each other.
+    expect(minPairwiseDistance(pos)).toBeGreaterThanOrEqual(MIN_SEP)
+  })
+})
+
+describe('neighborhood', () => {
+  // A line of five generations: g0 -> g1 -> g2 -> g3 -> g4.
+  const ids = ['g0', 'g1', 'g2', 'g3', 'g4']
+  const chain = [pc('g0', 'g1'), pc('g1', 'g2'), pc('g2', 'g3'), pc('g3', 'g4')]
+
+  it('includes the focus person and everyone within the given depth', () => {
+    const set = neighborhood(ids, chain, 'g2', 1)
+    expect([...set].sort()).toEqual(['g1', 'g2', 'g3'])
+  })
+
+  it('reaches further as depth grows', () => {
+    const set = neighborhood(ids, chain, 'g2', 2)
+    expect([...set].sort()).toEqual(['g0', 'g1', 'g2', 'g3', 'g4'])
+  })
+
+  it('treats relationships as undirected (reaches parents and children)', () => {
+    const set = neighborhood(ids, chain, 'g4', 1)
+    expect([...set].sort()).toEqual(['g3', 'g4'])
+  })
+
+  it('follows partner as well as parent_child edges', () => {
+    const set = neighborhood(
+      ['a', 'b', 'c'],
+      [partner('a', 'b'), pc('b', 'c')],
+      'a',
+      1,
+    )
+    // a's only relative within one hop is partner b.
+    expect([...set].sort()).toEqual(['a', 'b'])
+  })
+
+  it('returns just the focus person when they have no relatives', () => {
+    expect([...neighborhood(['solo', 'x'], [], 'solo', 3)]).toEqual(['solo'])
+  })
+
+  it('falls back to every node when the focus is absent', () => {
+    const set = neighborhood(ids, chain, 'ghost', 2)
+    expect(set.size).toBe(ids.length)
+  })
+
+  it('keeps the focus neighborhood laid out without overlap', () => {
+    const set = neighborhood(ids, chain, 'g2', 5)
+    const subIds = ids.filter((id) => set.has(id))
+    const subEdges = chain.filter((e) => set.has(e.from) && set.has(e.to))
+    const { pos } = computeLayout(subIds, subEdges)
     expect(minPairwiseDistance(pos)).toBeGreaterThanOrEqual(MIN_SEP)
   })
 })

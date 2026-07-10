@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PersonNode, Edge } from '../api'
-import { computeLayout } from './layout'
+import { computeLayout, neighborhood, type LayoutEdge } from './layout'
 import { labelFor } from './names'
+
+// The graph can be viewed two ways. 'tree' lays out the whole family by
+// generation; 'focus' shows just one person's nearby relatives, which keeps a
+// large tree legible on a small screen. The layout engine is the same for both
+// — 'focus' simply runs it over a bounded neighborhood.
+type ViewMode = 'tree' | 'focus'
+// How many relationship-hops out the focus view reaches from its center.
+const FOCUS_DEPTH = 3
 
 // The SVG's own coordinate viewport. It stays fixed so the on-screen element
 // keeps a stable size; the whole tree is fit into it via the pan/zoom
@@ -47,6 +55,10 @@ export default function GraphCanvas({
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 })
+  const [mode, setMode] = useState<ViewMode>('tree')
+  // Who the focus view centers on. Null until the user picks someone (or has a
+  // claimed "me" node), at which point it defaults sensibly below.
+  const [focusId, setFocusId] = useState<string | null>(null)
 
   // Active pointers, so we can tell a one-finger pan from a two-finger pinch.
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map())
@@ -56,26 +68,74 @@ export default function GraphCanvas({
   const pinchDist = useRef<number | null>(null)
   const moved = useRef(false)
 
-  // Recompute the layout only when the graph's shape changes, not on select.
+  const layoutEdges: LayoutEdge[] = useMemo(
+    () =>
+      edges.map((e) => ({
+        from: e.fromPerson,
+        to: e.toPerson,
+        kind: e.edgeKind,
+      })),
+    [edges],
+  )
+
+  // In focus mode, center on the user's pick, else their claimed node, else the
+  // first person — but only if that person is actually present.
+  const focusCandidate = focusId ?? meNodeId ?? nodes[0]?.nodeId ?? null
+  const effectiveFocus =
+    focusCandidate && nodes.some((n) => n.nodeId === focusCandidate)
+      ? focusCandidate
+      : null
+
+  // The people (and edges between them) this view actually shows.
+  const visible = useMemo(() => {
+    if (mode !== 'focus' || !effectiveFocus) return null
+    return neighborhood(
+      nodes.map((n) => n.nodeId),
+      layoutEdges,
+      effectiveFocus,
+      FOCUS_DEPTH,
+    )
+  }, [mode, effectiveFocus, nodes, layoutEdges])
+
+  const shownNodes = useMemo(
+    () => (visible ? nodes.filter((n) => visible.has(n.nodeId)) : nodes),
+    [visible, nodes],
+  )
+  const shownEdges = useMemo(
+    () =>
+      visible
+        ? edges.filter(
+            (e) => visible.has(e.fromPerson) && visible.has(e.toPerson),
+          )
+        : edges,
+    [visible, edges],
+  )
+
+  // Recompute the layout only when the visible graph's shape changes, not on
+  // select. Mode and focus change which people are visible, so they're keyed in.
   const layoutKey = useMemo(
     () =>
-      nodes
+      mode +
+      '|' +
+      (effectiveFocus ?? '') +
+      '|' +
+      shownNodes
         .map((n) => n.nodeId)
         .sort()
         .join(',') +
       '|' +
-      edges
+      shownEdges
         .map((e) => `${e.fromPerson}>${e.toPerson}`)
         .sort()
         .join(','),
-    [nodes, edges],
+    [mode, effectiveFocus, shownNodes, shownEdges],
   )
 
   const layout = useMemo(
     () =>
       computeLayout(
-        nodes.map((n) => n.nodeId),
-        edges.map((e) => ({
+        shownNodes.map((n) => n.nodeId),
+        shownEdges.map((e) => ({
           from: e.fromPerson,
           to: e.toPerson,
           kind: e.edgeKind,
@@ -205,10 +265,25 @@ export default function GraphCanvas({
     }
   }
 
-  // A tap only selects if the pointer didn't drag (which would be a pan).
+  // A tap only selects if the pointer didn't drag (which would be a pan). In
+  // focus mode a tap also re-centers the view on that person, so the graph
+  // becomes a way to walk the family one relative at a time.
   function selectIfTap(nodeId: string) {
-    if (!moved.current) onSelect(nodeId)
+    if (moved.current) return
+    if (mode === 'focus') setFocusId(nodeId)
+    onSelect(nodeId)
   }
+
+  // Enter focus mode centered on the current selection (or the "me" node).
+  function enterFocus() {
+    setFocusId(selectedId ?? meNodeId ?? null)
+    setMode('focus')
+  }
+
+  const focusName =
+    (effectiveFocus &&
+      nodes.find((n) => n.nodeId === effectiveFocus)?.name) ||
+    null
 
   if (nodes.length === 0) {
     return (
@@ -255,7 +330,7 @@ export default function GraphCanvas({
         </defs>
 
         <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-          {edges.map((e) => {
+          {shownEdges.map((e) => {
             const a = pos[e.fromPerson]
             const b = pos[e.toPerson]
             if (!a || !b) return null
@@ -285,13 +360,14 @@ export default function GraphCanvas({
             )
           })}
 
-          {nodes.map((n) => {
+          {shownNodes.map((n) => {
             const p = pos[n.nodeId]
             if (!p) return null
             const selected = n.nodeId === selectedId
             const isMe = meNodeId != null && n.nodeId === meNodeId
+            const isFocus = mode === 'focus' && n.nodeId === effectiveFocus
             const linked = Boolean(n.accountId)
-            const label = labelFor(n, nodes)
+            const label = labelFor(n, shownNodes)
             const ariaName = n.name || label
             return (
               <g
@@ -319,6 +395,16 @@ export default function GraphCanvas({
                     strokeWidth={2}
                   />
                 )}
+                {/* Amber ring marks the person the focus view is centered on
+                    (skipped when it's already the emerald "me" node). */}
+                {isFocus && !isMe && (
+                  <circle
+                    r={NODE_R + 4}
+                    fill="none"
+                    stroke="#fbbf24"
+                    strokeWidth={2}
+                  />
+                )}
                 <circle
                   r={NODE_R}
                   fill={selected ? '#f4f4f5' : '#27272a'}
@@ -342,6 +428,28 @@ export default function GraphCanvas({
           })}
         </g>
       </svg>
+
+      <div className="absolute left-2 top-2 flex flex-col items-start gap-1">
+        <div
+          role="group"
+          aria-label="Graph view"
+          className="flex overflow-hidden rounded-md border border-zinc-700 bg-zinc-900/90 text-xs"
+        >
+          <ModeButton active={mode === 'tree'} onClick={() => setMode('tree')}>
+            Whole tree
+          </ModeButton>
+          <ModeButton active={mode === 'focus'} onClick={enterFocus}>
+            Focus
+          </ModeButton>
+        </div>
+        {mode === 'focus' && (
+          <p className="max-w-[12rem] rounded bg-zinc-900/90 px-1.5 py-0.5 text-[11px] text-zinc-400">
+            {focusName
+              ? `Around ${focusName} · tap a relative to recenter`
+              : 'Pick someone to center on'}
+          </p>
+        )}
+      </div>
 
       <div className="absolute right-2 top-2 flex flex-col gap-1">
         <ControlButton label="Fit to view" onClick={() => setView(fitView())}>
@@ -373,6 +481,32 @@ function ControlButton({
       aria-label={label}
       onClick={onClick}
       className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-700 bg-zinc-900/90 text-lg text-zinc-300 hover:bg-zinc-800"
+    >
+      {children}
+    </button>
+  )
+}
+
+// One segment of the whole-tree / focus toggle.
+function ModeButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`px-2.5 py-1 ${
+        active
+          ? 'bg-zinc-200 text-zinc-900'
+          : 'text-zinc-300 hover:bg-zinc-800'
+      }`}
     >
       {children}
     </button>
