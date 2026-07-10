@@ -94,6 +94,11 @@ describe('linkAccountToNode', () => {
     const written = vi.mocked(putItem).mock.calls.map((c) => c[0])
     expect(written).toHaveLength(1)
     expect(written[0]).toMatchObject({ nodeId: 'nod_1', accountId: 'acc_1', updatedBy: 'acc_1' })
+    expect(vi.mocked(putItem).mock.calls[0][1]).toEqual({
+      conditionExpression:
+        '(attribute_not_exists(accountId) OR accountId = :null) AND (attribute_not_exists(deletedAt) OR deletedAt = :null)',
+      expressionAttributeValues: { ':null': null },
+    })
     expect(appendLog).toHaveBeenCalledWith(
       'g1', 'acc_1', 'link', 'node', 'nod_1',
       { nodeId: 'nod_1', accountId: null },
@@ -114,14 +119,25 @@ describe('linkAccountToNode', () => {
     expect(res).toEqual({ status: 'ok', nodeId: 'nod_2' })
 
     const written = vi.mocked(putItem).mock.calls.map((c) => c[0])
-    // nod_1 cleared, then nod_2 linked.
-    expect(written[0]).toMatchObject({ nodeId: 'nod_1', accountId: null })
-    expect(written[1]).toMatchObject({ nodeId: 'nod_2', accountId: 'acc_1' })
+    // nod_2 claimed first; then nod_1 cleared.
+    expect(written[0]).toMatchObject({ nodeId: 'nod_2', accountId: 'acc_1' })
+    expect(written[1]).toMatchObject({ nodeId: 'nod_1', accountId: null })
     expect(appendLog).toHaveBeenCalledWith(
       'g1', 'acc_1', 'unlink', 'node', 'nod_1',
       { nodeId: 'nod_1', accountId: 'acc_1' },
       { nodeId: 'nod_1', accountId: null },
     )
+  })
+
+  it('turns a concurrent claim into a conflict', async () => {
+    vi.mocked(getItem)
+      .mockResolvedValueOnce(liveMember)
+      .mockResolvedValueOnce({ nodeId: 'nod_1', name: 'Ada', accountId: null, deletedAt: null })
+      .mockResolvedValueOnce({ nodeId: 'nod_1', name: 'Ada', accountId: 'acc_2', deletedAt: null })
+    vi.mocked(putItem).mockResolvedValueOnce(false)
+
+    expect(await linkAccountToNode('g1', 'acc_1', 'acc_1', 'nod_1')).toBe('conflict')
+    expect(appendLog).not.toHaveBeenCalled()
   })
 })
 
@@ -150,5 +166,17 @@ describe('unlinkAccount', () => {
       { nodeId: 'nod_1', accountId: 'acc_1' },
       { nodeId: 'nod_1', accountId: null },
     )
+  })
+
+  it('clears every linked node when legacy duplicates exist', async () => {
+    vi.mocked(queryPrefix).mockResolvedValueOnce([
+      { nodeId: 'nod_1', name: 'Ada', accountId: 'acc_1', deletedAt: null },
+      { nodeId: 'nod_2', name: 'Bo', accountId: 'acc_1', deletedAt: null },
+    ])
+
+    const res = await unlinkAccount('g1', 'acc_9', 'acc_1')
+    expect(res).toEqual({ status: 'ok', nodeId: 'nod_1' })
+    expect(vi.mocked(putItem).mock.calls.map((c) => c[0].nodeId)).toEqual(['nod_1', 'nod_2'])
+    expect(vi.mocked(appendLog).mock.calls.map((c) => c[4])).toEqual(['nod_1', 'nod_2'])
   })
 })

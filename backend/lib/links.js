@@ -16,10 +16,10 @@ import { appendLog, membershipKey } from './groups.js'
 //   2. an account -> at most one node per group (before linking we clear any
 //      other node the account already holds, so a re-link "moves" cleanly).
 //
-// Writes are sequential and non-transactional, matching the existing pattern
-// (see groups.createGroup): a concurrent double-link has a small race window we
-// accept for a casual family app. Every link/unlink preserves updatedAt/
-// updatedBy and appends to the append-only edit_log.
+// Writes stay sequential and non-transactional, matching the rest of the app,
+// but the final claim write is conditional so a concurrent claim flips into a
+// conflict instead of silent last-write-wins. Every link/unlink preserves
+// updatedAt/updatedBy and appends to the append-only edit_log.
 
 function nodeKey(groupId, nodeId) {
   return { PK: `GROUP#${groupId}`, SK: `NODE#${nodeId}` }
@@ -61,6 +61,21 @@ export async function linkAccountToNode(groupId, actorAccountId, targetAccountId
 
   const now = new Date().toISOString()
 
+  const claimed = await putItem(
+    { ...node, accountId: targetAccountId, updatedAt: now, updatedBy: actorAccountId },
+    {
+      conditionExpression:
+        '(attribute_not_exists(accountId) OR accountId = :null) AND (attribute_not_exists(deletedAt) OR deletedAt = :null)',
+      expressionAttributeValues: { ':null': null },
+    },
+  )
+  if (!claimed) {
+    const current = await getItem(nodeKey(groupId, nodeId))
+    if (!current || current.deletedAt) return 'not_found_node'
+    if (current.accountId === targetAccountId) return { status: 'ok', nodeId }
+    return 'conflict'
+  }
+
   // Enforce one-node-per-account: unlink any other node this account holds so a
   // "this is actually me" correction moves the link instead of duplicating it.
   const nodes = await liveNodes(groupId)
@@ -79,7 +94,6 @@ export async function linkAccountToNode(groupId, actorAccountId, targetAccountId
     }
   }
 
-  await putItem({ ...node, accountId: targetAccountId, updatedAt: now, updatedBy: actorAccountId })
   await appendLog(
     groupId,
     actorAccountId,
@@ -96,19 +110,21 @@ export async function linkAccountToNode(groupId, actorAccountId, targetAccountId
 // { status: 'ok', nodeId } or 'not_found' if the account isn't linked.
 export async function unlinkAccount(groupId, actorAccountId, targetAccountId) {
   const nodes = await liveNodes(groupId)
-  const linked = nodes.find((n) => n.accountId === targetAccountId)
-  if (!linked) return 'not_found'
+  const linked = nodes.filter((n) => n.accountId === targetAccountId)
+  if (linked.length === 0) return 'not_found'
 
   const now = new Date().toISOString()
-  await putItem({ ...linked, accountId: null, updatedAt: now, updatedBy: actorAccountId })
-  await appendLog(
-    groupId,
-    actorAccountId,
-    'unlink',
-    'node',
-    linked.nodeId,
-    { nodeId: linked.nodeId, accountId: targetAccountId },
-    { nodeId: linked.nodeId, accountId: null },
-  )
-  return { status: 'ok', nodeId: linked.nodeId }
+  for (const node of linked) {
+    await putItem({ ...node, accountId: null, updatedAt: now, updatedBy: actorAccountId })
+    await appendLog(
+      groupId,
+      actorAccountId,
+      'unlink',
+      'node',
+      node.nodeId,
+      { nodeId: node.nodeId, accountId: targetAccountId },
+      { nodeId: node.nodeId, accountId: null },
+    )
+  }
+  return { status: 'ok', nodeId: linked[0].nodeId }
 }

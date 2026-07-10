@@ -117,4 +117,30 @@ describe('JoinScreen', () => {
       expect(linkPersonNode).toHaveBeenCalledWith('grp_1', 'acc_9', 'nod_1'),
     )
   })
+
+  it('falls through to the app when the post-join fetch fails', async () => {
+    vi.mocked(previewInvite).mockResolvedValue({ valid: true, groupName: 'The Lotts' })
+    vi.mocked(acceptInvite).mockResolvedValue({
+      groupId: 'grp_1',
+      name: 'The Lotts',
+      role: 'editor',
+    })
+    vi.mocked(getMe).mockRejectedValue(new Error('network blip'))
+    vi.mocked(getGraph).mockResolvedValue({ nodes: [], edges: [] })
+    Object.defineProperty(window, 'location', {
+      value: { origin: 'http://localhost', href: '' },
+      writable: true,
+    })
+
+    render(<JoinScreen token="tok" signedIn={true} />)
+    await waitFor(() =>
+      expect(screen.getByText('Join The Lotts')).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByText('Join The Lotts'))
+    await waitFor(() =>
+      expect(window.location.href).toBe('http://localhost/'),
+    )
+    expect(screen.queryByText(/Could not join/i)).not.toBeInTheDocument()
+  })
 })

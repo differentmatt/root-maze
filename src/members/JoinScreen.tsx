@@ -63,7 +63,12 @@ export default function JoinScreen({
       const result = await acceptInvite(token)
       // Offer to link on join. If we can't figure out the people (or there are
       // no unclaimed ones), just fall through to the app.
-      const [me, graph] = await Promise.all([getMe(), getGraph(result.groupId)])
+      const details = await Promise.all([getMe(), getGraph(result.groupId)]).catch(() => null)
+      if (!details) {
+        goToApp()
+        return
+      }
+      const [me, graph] = details
       const unclaimed = graph.nodes.filter((n) => !n.accountId)
       if (unclaimed.length === 0) {
         goToApp()

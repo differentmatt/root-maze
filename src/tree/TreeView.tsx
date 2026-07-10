@@ -585,8 +585,8 @@ function Field({
 
 // "This is me": claim (or release) a person as the signed-in account. A member
 // manages their own link freely; owners can additionally unlink anyone (to fix
-// a wrong claim). Linking yourself to a new person moves the link off whoever
-// you were before — the server does the move; we just hint at it here.
+// a wrong claim). This UI hides "This is me" once you're already linked, so
+// re-linking yourself here means unlinking first and then claiming the new one.
 function LinkSection({
   groupId,
   person,

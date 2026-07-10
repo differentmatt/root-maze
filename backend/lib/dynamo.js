@@ -21,15 +21,25 @@ export async function getItem(key) {
 // Put with an optional condition (e.g. attribute_not_exists(PK) to avoid
 // clobbering an existing item). Returns true on success, false if the
 // condition failed.
-export async function putItem(item, conditionExpression) {
+export async function putItem(item, condition) {
+  const options = typeof condition === 'string'
+    ? { ConditionExpression: condition }
+    : condition
+      ? {
+          ...(condition.conditionExpression
+            ? { ConditionExpression: condition.conditionExpression }
+            : {}),
+          ...(condition.expressionAttributeValues
+            ? { ExpressionAttributeValues: condition.expressionAttributeValues }
+            : {}),
+        }
+      : {}
   try {
     await client.send(
       new PutCommand({
         TableName: TABLE,
         Item: item,
-        ...(conditionExpression
-          ? { ConditionExpression: conditionExpression }
-          : {}),
+        ...options,
       }),
     )
     return true
