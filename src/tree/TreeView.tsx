@@ -454,7 +454,7 @@ function PersonPanel({
   // Seed the structured fields from the node, splitting a legacy single name
   // into first/last so editing an old person starts sensibly if the user opts to
   // review those fields.
-  const initialParts = useMemo(() => namePartsOf(person), [person])
+  const initialParts = namePartsOf(person)
   const isLegacyName =
     !person.firstName && !person.lastName && !person.middleName && !person.birthName
   const [firstName, setFirstName] = useState(initialParts.firstName)

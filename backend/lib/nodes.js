@@ -130,7 +130,9 @@ export async function updateNode(groupId, accountId, nodeId, patch) {
 
   const touchesStructuredName =
     patch.firstName !== undefined ||
-    OPTIONAL_NAME_PARTS.some((field) => patch[field] !== undefined)
+    patch.lastName !== undefined ||
+    patch.middleName !== undefined ||
+    patch.birthName !== undefined
 
   if (patch.firstName !== undefined) {
     const firstName = typeof patch.firstName === 'string' ? patch.firstName.trim() : ''
