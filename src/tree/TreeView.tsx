@@ -475,9 +475,8 @@ function buildPersonPatch({
   if (deathdate !== saved.deathdate) patch.deathdate = deathdate.trim() || null
   if (notes !== saved.notes) patch.notes = notes.trim() || null
 
-  // Legacy rows still store only `name`; when a user edits one structured
-  // part, include firstName too so the backend doesn't receive a partial
-  // migration like only lastName/birthName.
+  // Ensure legacy rows also send firstName when any structured field changes,
+  // so migrating an old single-string name can't persist only lastName/birthName.
   if (structuredDirty && isLegacyName && patch.firstName === undefined) {
     patch.firstName = nextFirstName
   }

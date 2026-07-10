@@ -21,8 +21,8 @@ function nodeKey(groupId, nodeId) {
 
 /**
  * Trim a client-supplied optional string down to a value or null.
- * Blank/whitespace and non-strings collapse to null so we never store ""
- * for an absent name part.
+ * Non-string values return null immediately. Blank/whitespace strings also
+ * collapse to null so we never store "" for an absent name part.
  * @param {unknown} v
  * @returns {string | null}
  */
