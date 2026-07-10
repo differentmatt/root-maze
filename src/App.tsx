@@ -21,8 +21,6 @@ type Load =
 export default function App() {
   const [credential, setCred] = useState<string | null>(getCredential())
   const [load, setLoad] = useState<Load>({ status: 'idle' })
-  const [name, setName] = useState('')
-  const [creating, setCreating] = useState(false)
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
 
   // An invite link is /?invite=<token>. When present, the join flow takes over
@@ -53,19 +51,16 @@ export default function App() {
     }
   }, [credential])
 
-  async function handleCreate() {
-    if (!name.trim()) return
-    setCreating(true)
+  // After creating a group, re-fetch /me so the new group shows up, and switch
+  // to it.
+  async function handleCreated(group: Group) {
     try {
-      await createGroup(name.trim())
       const me = await getMe()
       setLoad({ status: 'ready', me })
-      setName('')
+      setActiveGroupId(group.groupId)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Create failed'
       setLoad({ status: 'error', message })
-    } finally {
-      setCreating(false)
     }
   }
 
@@ -113,6 +108,7 @@ export default function App() {
               groups={load.me.groups}
               activeGroupId={activeGroupId}
               onSelect={setActiveGroupId}
+              onCreated={handleCreated}
             />
           )}
 
@@ -121,19 +117,7 @@ export default function App() {
               <p className="text-zinc-400">
                 You're not in a group yet. Create one to get started.
               </p>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Group name (e.g. The Lotts)"
-                className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
-              />
-              <button
-                onClick={handleCreate}
-                disabled={creating || !name.trim()}
-                className="rounded-md bg-zinc-100 px-3 py-2 font-medium text-zinc-900 disabled:opacity-40"
-              >
-                {creating ? 'Creating…' : 'Create group'}
-              </button>
+              <CreateGroupForm onCreated={handleCreated} />
             </div>
           )}
         </section>
@@ -149,29 +133,53 @@ function GroupWorkspace({
   groups,
   activeGroupId,
   onSelect,
+  onCreated,
 }: {
   groups: Group[]
   activeGroupId: string | null
   onSelect: (groupId: string) => void
+  onCreated: (group: Group) => Promise<void> | void
 }) {
   const active =
     groups.find((g) => g.groupId === activeGroupId) ?? groups[0]
   const [tab, setTab] = useState<'tree' | 'members'>('tree')
+  const [creatingGroup, setCreatingGroup] = useState(false)
 
   return (
     <div className="flex flex-col gap-4">
-      {groups.length > 1 && (
-        <select
-          value={active.groupId}
-          onChange={(e) => onSelect(e.target.value)}
-          className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+      {/* Group switcher (only meaningful with more than one) plus a way to
+          start another group you own — the backend has always allowed it. */}
+      <div className="flex items-center gap-2">
+        {groups.length > 1 && (
+          <select
+            value={active.groupId}
+            onChange={(e) => onSelect(e.target.value)}
+            className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none"
+          >
+            {groups.map((g) => (
+              <option key={g.groupId} value={g.groupId}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <button
+          onClick={() => setCreatingGroup((v) => !v)}
+          className="ml-auto shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
         >
-          {groups.map((g) => (
-            <option key={g.groupId} value={g.groupId}>
-              {g.name}
-            </option>
-          ))}
-        </select>
+          {creatingGroup ? 'Cancel' : 'New group'}
+        </button>
+      </div>
+
+      {creatingGroup && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+          <CreateGroupForm
+            onCreated={async (group) => {
+              setCreatingGroup(false)
+              await onCreated(group)
+            }}
+          />
+        </div>
       )}
 
       <div className="flex gap-1 rounded-md border border-zinc-800 bg-zinc-900 p-1 text-sm">
@@ -188,6 +196,52 @@ function GroupWorkspace({
       ) : (
         <MembersPanel key={active.groupId} group={active} />
       )}
+    </div>
+  )
+}
+
+// Reusable "name a new group and create it" form. Used both for a member's
+// first group and the "New group" affordance in the workspace.
+function CreateGroupForm({
+  onCreated,
+}: {
+  onCreated: (group: Group) => Promise<void> | void
+}) {
+  const [name, setName] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit() {
+    if (!name.trim()) return
+    setCreating(true)
+    setError('')
+    try {
+      const group = await createGroup(name.trim())
+      setName('')
+      await onCreated(group)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Create failed')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Group name (e.g. The Lotts)"
+        className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+      />
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      <button
+        onClick={submit}
+        disabled={creating || !name.trim()}
+        className="rounded-md bg-zinc-100 px-3 py-2 font-medium text-zinc-900 disabled:opacity-40"
+      >
+        {creating ? 'Creating…' : 'Create group'}
+      </button>
     </div>
   )
 }

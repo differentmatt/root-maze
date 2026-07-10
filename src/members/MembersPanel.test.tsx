@@ -10,6 +10,9 @@ vi.mock('../api', async (importOriginal) => ({
   getInvites: vi.fn(),
   createInvite: vi.fn(),
   revokeInvite: vi.fn(),
+  getGraph: vi.fn(),
+  linkPersonNode: vi.fn(),
+  unlinkPersonNode: vi.fn(),
 }))
 
 import {
@@ -19,16 +22,53 @@ import {
   getInvites,
   createInvite,
   revokeInvite,
+  getGraph,
+  linkPersonNode,
+  unlinkPersonNode,
 } from '../api'
 
 const group = { groupId: 'grp_1', name: 'The Lotts', role: 'owner' }
 
 const members = {
   members: [
-    { accountId: 'acc_1', role: 'owner' as const, email: 'a@b.com', name: 'Ann', joinedAt: 't' },
-    { accountId: 'acc_2', role: 'editor' as const, email: 'b@b.com', name: 'Bo', joinedAt: 't' },
+    {
+      accountId: 'acc_1',
+      role: 'owner' as const,
+      email: 'a@b.com',
+      name: 'Ann',
+      joinedAt: 't',
+      linkedNodeId: null,
+      linkedNodeName: null,
+    },
+    {
+      accountId: 'acc_2',
+      role: 'editor' as const,
+      email: 'b@b.com',
+      name: 'Bo',
+      joinedAt: 't',
+      linkedNodeId: null,
+      linkedNodeName: null,
+    },
   ],
   me: 'acc_1',
+}
+
+const graph = {
+  nodes: [
+    {
+      nodeId: 'nod_1',
+      groupId: 'grp_1',
+      name: 'Ann Lott',
+      birthdate: null,
+      deathdate: null,
+      notes: null,
+      accountId: null,
+      createdAt: 't',
+      updatedAt: 't',
+      updatedBy: 'acc_1',
+    },
+  ],
+  edges: [],
 }
 
 afterEach(() => {
@@ -39,6 +79,7 @@ afterEach(() => {
 function ready(invites: unknown[] = []) {
   vi.mocked(getMembers).mockResolvedValue(members)
   vi.mocked(getInvites).mockResolvedValue({ invites: invites as never })
+  vi.mocked(getGraph).mockResolvedValue(graph as never)
 }
 
 describe('MembersPanel', () => {
@@ -122,6 +163,51 @@ describe('MembersPanel', () => {
     fireEvent.click(screen.getAllByText('Leave')[0])
     await waitFor(() =>
       expect(screen.getByText('Cannot remove the last owner')).toBeInTheDocument(),
+    )
+  })
+
+  it('links a member to a person via the picker', async () => {
+    ready()
+    vi.mocked(linkPersonNode).mockResolvedValue({ accountId: 'acc_1', nodeId: 'nod_1' })
+    render(<MembersPanel group={group} />)
+    await waitFor(() => expect(screen.getByText('Ann')).toBeInTheDocument())
+
+    const picker = screen.getByLabelText('Linked person for Ann')
+    fireEvent.change(picker, { target: { value: 'nod_1' } })
+    await waitFor(() =>
+      expect(linkPersonNode).toHaveBeenCalledWith('grp_1', 'acc_1', 'nod_1'),
+    )
+  })
+
+  it('unlinks a linked member by choosing "not linked"', async () => {
+    vi.mocked(getMembers).mockResolvedValue({
+      members: [
+        {
+          ...members.members[0],
+          linkedNodeId: 'nod_1',
+          linkedNodeName: 'Ann Lott',
+        },
+        members.members[1],
+      ],
+      me: 'acc_1',
+    })
+    vi.mocked(getInvites).mockResolvedValue({ invites: [] })
+    vi.mocked(getGraph).mockResolvedValue({
+      nodes: [{ ...graph.nodes[0], accountId: 'acc_1' }],
+      edges: [],
+    } as never)
+    vi.mocked(unlinkPersonNode).mockResolvedValue({
+      accountId: 'acc_1',
+      nodeId: 'nod_1',
+      unlinked: true,
+    })
+    render(<MembersPanel group={group} />)
+    await waitFor(() => expect(screen.getByText('Ann')).toBeInTheDocument())
+
+    const picker = screen.getByLabelText('Linked person for Ann')
+    fireEvent.change(picker, { target: { value: '' } })
+    await waitFor(() =>
+      expect(unlinkPersonNode).toHaveBeenCalledWith('grp_1', 'acc_1'),
     )
   })
 

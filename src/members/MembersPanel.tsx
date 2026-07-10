@@ -7,11 +7,15 @@ import {
   createInvite,
   revokeInvite,
   inviteUrl,
+  getGraph,
+  linkPersonNode,
+  unlinkPersonNode,
   ApiError,
   type Group,
   type Member,
   type Invite,
   type Role,
+  type PersonNode,
 } from '../api'
 
 type Status = 'loading' | 'ready' | 'error'
@@ -25,6 +29,7 @@ export default function MembersPanel({ group }: { group: Group }) {
   const [error, setError] = useState('')
   const [members, setMembers] = useState<Member[]>([])
   const [me, setMe] = useState('')
+  const [nodes, setNodes] = useState<PersonNode[]>([])
   const [invites, setInvites] = useState<Invite[]>([])
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
@@ -32,10 +37,17 @@ export default function MembersPanel({ group }: { group: Group }) {
   const load = useCallback(async () => {
     setStatus('loading')
     try {
-      const [m, i] = await Promise.all([getMembers(groupId), getInvites(groupId)])
+      // The graph comes along so we can offer a "which person is this member?"
+      // picker built from the group's people.
+      const [m, i, g] = await Promise.all([
+        getMembers(groupId),
+        getInvites(groupId),
+        getGraph(groupId),
+      ])
       setMembers(m.members)
       setMe(m.me)
       setInvites(i.invites)
+      setNodes(g.nodes)
       setStatus('ready')
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return
@@ -73,6 +85,8 @@ export default function MembersPanel({ group }: { group: Group }) {
     }
   }
 
+  const isOwner = members.find((m) => m.accountId === me)?.role === 'owner'
+
   if (status === 'loading') return <p className="text-zinc-400">Loading members…</p>
   if (status === 'error') return <p className="text-red-400">Error: {error}</p>
 
@@ -84,40 +98,52 @@ export default function MembersPanel({ group }: { group: Group }) {
           {members.map((m) => (
             <li
               key={m.accountId}
-              className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
+              className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
             >
-              <div className="min-w-0">
-                <p className="truncate text-sm text-zinc-100">
-                  {m.name || m.email || m.accountId}
-                  {m.accountId === me && (
-                    <span className="ml-1 text-xs text-zinc-500">(you)</span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-zinc-100">
+                    {m.name || m.email || m.accountId}
+                    {m.accountId === me && (
+                      <span className="ml-1 text-xs text-zinc-500">(you)</span>
+                    )}
+                  </p>
+                  {m.email && m.name && (
+                    <p className="truncate text-xs text-zinc-500">{m.email}</p>
                   )}
-                </p>
-                {m.email && m.name && (
-                  <p className="truncate text-xs text-zinc-500">{m.email}</p>
-                )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <select
+                    aria-label={`Role for ${m.name || m.email || m.accountId}`}
+                    value={m.role}
+                    disabled={busy}
+                    onChange={(e) =>
+                      run(() => changeMemberRole(groupId, m.accountId, e.target.value as Role))
+                    }
+                    className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-40"
+                  >
+                    <option value="owner">owner</option>
+                    <option value="editor">editor</option>
+                  </select>
+                  <button
+                    onClick={() => run(() => removeMember(groupId, m.accountId))}
+                    disabled={busy}
+                    className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-red-400 hover:border-red-500/50 disabled:opacity-40"
+                  >
+                    {m.accountId === me ? 'Leave' : 'Remove'}
+                  </button>
+                </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <select
-                  aria-label={`Role for ${m.name || m.email || m.accountId}`}
-                  value={m.role}
-                  disabled={busy}
-                  onChange={(e) =>
-                    run(() => changeMemberRole(groupId, m.accountId, e.target.value as Role))
-                  }
-                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-40"
-                >
-                  <option value="owner">owner</option>
-                  <option value="editor">editor</option>
-                </select>
-                <button
-                  onClick={() => run(() => removeMember(groupId, m.accountId))}
-                  disabled={busy}
-                  className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-red-400 hover:border-red-500/50 disabled:opacity-40"
-                >
-                  {m.accountId === me ? 'Leave' : 'Remove'}
-                </button>
-              </div>
+              <MemberLink
+                member={m}
+                nodes={nodes}
+                canEdit={m.accountId === me || isOwner}
+                busy={busy}
+                onLink={(nodeId) =>
+                  run(() => linkPersonNode(groupId, m.accountId, nodeId))
+                }
+                onUnlink={() => run(() => unlinkPersonNode(groupId, m.accountId))}
+              />
             </li>
           ))}
         </ul>
@@ -182,6 +208,64 @@ export default function MembersPanel({ group }: { group: Group }) {
           {notice}
         </p>
       )}
+    </div>
+  )
+}
+
+// Which person in the tree a member is. Editable by the member themselves, or by
+// an owner (matching the server-side rule); everyone else just sees the status.
+// The picker offers unclaimed people plus the member's current person, so it
+// can't accidentally steal someone else's link.
+function MemberLink({
+  member,
+  nodes,
+  canEdit,
+  busy,
+  onLink,
+  onUnlink,
+}: {
+  member: Member
+  nodes: PersonNode[]
+  canEdit: boolean
+  busy: boolean
+  onLink: (nodeId: string) => void
+  onUnlink: () => void
+}) {
+  const candidates = nodes.filter(
+    (n) => !n.accountId || n.accountId === member.accountId,
+  )
+
+  if (!canEdit) {
+    return (
+      <p className="text-xs text-zinc-500">
+        {member.linkedNodeName ? (
+          <>
+            Linked to <span className="text-zinc-300">{member.linkedNodeName}</span>
+          </>
+        ) : (
+          'Not linked to a person'
+        )}
+      </p>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <label className="text-xs text-zinc-500">Person</label>
+      <select
+        aria-label={`Linked person for ${member.name || member.email || member.accountId}`}
+        value={member.linkedNodeId ?? ''}
+        disabled={busy}
+        onChange={(e) => (e.target.value ? onLink(e.target.value) : onUnlink())}
+        className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-40"
+      >
+        <option value="">— not linked —</option>
+        {candidates.map((n) => (
+          <option key={n.nodeId} value={n.nodeId}>
+            {n.name}
+          </option>
+        ))}
+      </select>
     </div>
   )
 }
