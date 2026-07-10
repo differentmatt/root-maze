@@ -317,6 +317,31 @@ function orderRows(
       reindex()
     }
   }
+
+  // Keep couples adjacent. Barycenter alone can leave a partner stranded on the
+  // far side of the row (e.g. next to a spouse's siblings), which makes the
+  // straight partner edge cross the people sitting between them and read as if
+  // those in-between people were the partners. Pull each person's same-row
+  // partners to sit right beside them, preserving the barycenter order otherwise.
+  for (const r of rowKeys) {
+    const row = rows.get(r)!
+    const inRow = new Set(row)
+    const placed = new Set<string>()
+    const ordered: string[] = []
+    for (const id of row) {
+      if (placed.has(id)) continue
+      ordered.push(id)
+      placed.add(id)
+      for (const pn of partners.get(id)!) {
+        if (inRow.has(pn) && !placed.has(pn)) {
+          ordered.push(pn)
+          placed.add(pn)
+        }
+      }
+    }
+    rows.set(r, ordered)
+  }
+  reindex()
 }
 
 // Assign an x to every person: pull each toward the average x of their

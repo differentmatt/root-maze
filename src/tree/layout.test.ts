@@ -67,6 +67,36 @@ describe('computeLayout', () => {
     expect(pos.a.y).toBe(pos.b.y)
   })
 
+  it('keeps a couple adjacent so the partner edge never crosses siblings', () => {
+    // Two parents with several children; one child has a partner. The partner
+    // must sit next to their spouse, not on the far side of the spouse's
+    // siblings — otherwise the straight partner edge is drawn through the
+    // in-between siblings and reads as if they were the partners.
+    const ids = ['mom', 'dad', 'me', 'sibA', 'sibB', 'sibC', 'spouse']
+    const edges: LayoutEdge[] = [
+      partner('mom', 'dad'),
+      pc('mom', 'me'),
+      pc('dad', 'me'),
+      pc('mom', 'sibA'),
+      pc('dad', 'sibA'),
+      pc('mom', 'sibB'),
+      pc('dad', 'sibB'),
+      pc('mom', 'sibC'),
+      pc('dad', 'sibC'),
+      partner('me', 'spouse'),
+    ]
+    const { pos } = computeLayout(ids, edges)
+    // Same row (same generation).
+    expect(pos.spouse.y).toBe(pos.me.y)
+    // No sibling sits horizontally between 'me' and 'spouse'.
+    const lo = Math.min(pos.me.x, pos.spouse.x)
+    const hi = Math.max(pos.me.x, pos.spouse.x)
+    for (const sib of ['sibA', 'sibB', 'sibC']) {
+      const between = pos[sib].x > lo && pos[sib].x < hi
+      expect(between).toBe(false)
+    }
+  })
+
   it('places grandchildren two rows below grandparents', () => {
     const { pos } = computeLayout(
       ['g', 'p', 'c'],
