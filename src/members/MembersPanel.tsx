@@ -7,52 +7,43 @@ import {
   createInvite,
   revokeInvite,
   inviteUrl,
-  getGraph,
-  linkPersonNode,
-  unlinkPersonNode,
   ApiError,
   type Group,
   type Member,
   type Invite,
   type Role,
-  type PersonNode,
 } from '../api'
-import PersonPicker from '../components/PersonPicker'
 
 type Status = 'loading' | 'ready' | 'error'
 
-// Membership management for a single group: who's in it, their roles, and the
-// shareable invite links. Any member can manage membership (the app is a casual
-// shared family tree); the server still guarantees the group keeps ≥1 owner.
+// Membership management for a single group: who's in it, their roles, the person
+// each member is linked to (read-only here — linking happens in the tree via
+// "This is me"), and the shareable invite links. Any member can manage
+// membership (the app is a casual shared family tree); the server still
+// guarantees the group keeps ≥1 owner.
 export default function MembersPanel({ group }: { group: Group }) {
   const groupId = group.groupId
   const [status, setStatus] = useState<Status>('loading')
   const [error, setError] = useState('')
   const [members, setMembers] = useState<Member[]>([])
   const [me, setMe] = useState('')
-  const [nodes, setNodes] = useState<PersonNode[]>([])
   const [invites, setInvites] = useState<Invite[]>([])
   const [busy, setBusy] = useState(false)
-  // Which member's link is mid-flight, so only that row shows a spinner.
-  const [linkBusyId, setLinkBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
 
   // On a refresh (silent) we keep the panel on screen instead of flashing the
-  // full "Loading…" state, so a link/role change feels in-place.
+  // full "Loading…" state, so a role change feels in-place. The members list is
+  // enriched server-side with each member's linked person, so no graph fetch.
   const load = useCallback(async (silent = false) => {
     if (!silent) setStatus('loading')
     try {
-      // The graph comes along so we can offer a "which person is this member?"
-      // picker built from the group's people.
-      const [m, i, g] = await Promise.all([
+      const [m, i] = await Promise.all([
         getMembers(groupId),
         getInvites(groupId),
-        getGraph(groupId),
       ])
       setMembers(m.members)
       setMe(m.me)
       setInvites(i.invites)
-      setNodes(g.nodes)
       setStatus('ready')
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return
@@ -79,20 +70,6 @@ export default function MembersPanel({ group }: { group: Group }) {
     }
   }
 
-  // Like `run`, but scoped to one member's link so that row can show progress.
-  async function runLink(accountId: string, fn: () => Promise<unknown>) {
-    setLinkBusyId(accountId)
-    setNotice('')
-    try {
-      await fn()
-      await load(true)
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Action failed')
-    } finally {
-      setLinkBusyId(null)
-    }
-  }
-
   async function copyLink(token: string) {
     const url = inviteUrl(token)
     try {
@@ -103,8 +80,6 @@ export default function MembersPanel({ group }: { group: Group }) {
       setNotice(url)
     }
   }
-
-  const isOwner = members.find((m) => m.accountId === me)?.role === 'owner'
 
   if (status === 'loading') return <p className="text-zinc-400">Loading members…</p>
   if (status === 'error') return <p className="text-red-400">Error: {error}</p>
@@ -153,21 +128,14 @@ export default function MembersPanel({ group }: { group: Group }) {
                   </button>
                 </div>
               </div>
-              <MemberLink
-                member={m}
-                nodes={nodes}
-                canEdit={m.accountId === me || isOwner}
-                busy={linkBusyId === m.accountId}
-                disabled={busy || (linkBusyId !== null && linkBusyId !== m.accountId)}
-                onLink={(nodeId) =>
-                  runLink(m.accountId, () =>
-                    linkPersonNode(groupId, m.accountId, nodeId),
-                  )
-                }
-                onUnlink={() =>
-                  runLink(m.accountId, () => unlinkPersonNode(groupId, m.accountId))
-                }
-              />
+              {/* Who this member is in the tree — read-only. Claiming a person
+                  ("This is me") happens in the tree, not here. */}
+              {m.linkedNodeName && (
+                <p className="text-xs text-zinc-500">
+                  Linked to{' '}
+                  <span className="text-zinc-300">{m.linkedNodeName}</span>
+                </p>
+              )}
             </li>
           ))}
         </ul>
@@ -232,66 +200,6 @@ export default function MembersPanel({ group }: { group: Group }) {
           {notice}
         </p>
       )}
-    </div>
-  )
-}
-
-// Which person in the tree a member is. Editable by the member themselves, or by
-// an owner (matching the server-side rule); everyone else just sees the status.
-// The picker offers unclaimed people plus the member's current person, so it
-// can't accidentally steal someone else's link.
-function MemberLink({
-  member,
-  nodes,
-  canEdit,
-  busy,
-  disabled,
-  onLink,
-  onUnlink,
-}: {
-  member: Member
-  nodes: PersonNode[]
-  canEdit: boolean
-  // `busy` = this member's link is mid-flight (show a spinner); `disabled` =
-  // some other action is running, so lock the control without a spinner.
-  busy: boolean
-  disabled: boolean
-  onLink: (nodeId: string) => void
-  onUnlink: () => void
-}) {
-  const candidates = nodes.filter(
-    (n) => !n.accountId || n.accountId === member.accountId,
-  )
-
-  if (!canEdit) {
-    return (
-      <p className="text-xs text-zinc-500">
-        {member.linkedNodeName ? (
-          <>
-            Linked to <span className="text-zinc-300">{member.linkedNodeName}</span>
-          </>
-        ) : (
-          'Not linked to a person'
-        )}
-      </p>
-    )
-  }
-
-  return (
-    <div className="flex items-center gap-2">
-      <label className="shrink-0 text-xs text-zinc-500">Person</label>
-      <div className="min-w-0 flex-1">
-        <PersonPicker
-          ariaLabel={`Linked person for ${member.name || member.email || member.accountId}`}
-          options={candidates.map((n) => ({ id: n.nodeId, label: n.name }))}
-          value={member.linkedNodeId ?? null}
-          disabled={busy || disabled}
-          clearLabel="— not linked —"
-          placeholder="Link a person…"
-          onChange={(id) => (id ? onLink(id) : onUnlink())}
-        />
-      </div>
-      {busy && <span className="shrink-0 text-xs text-zinc-500">Saving…</span>}
     </div>
   )
 }

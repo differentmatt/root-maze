@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import AuthButton from './components/AuthButton'
 import {
   getCredential,
@@ -247,9 +247,9 @@ function GroupPanel({
         {!creatingGroup ? (
           <button
             onClick={() => setCreatingGroup(true)}
-            className="self-start text-sm text-zinc-400 hover:text-zinc-200"
+            className="self-start rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800"
           >
-            + New group
+            New group
           </button>
         ) : (
           <div className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
@@ -279,8 +279,9 @@ function GroupPanel({
   )
 }
 
-// Rename the active group. Any member may rename (enforced server-side); the
-// field seeds from the current name and saves on submit.
+// Rename the active group. Any member may rename (enforced server-side). Like
+// the person panel, this auto-saves after a short pause once the name actually
+// changes — no explicit button. An empty name is the one thing it won't persist.
 function RenameGroupForm({
   group,
   onRenamed,
@@ -291,55 +292,61 @@ function RenameGroupForm({
   // Seeded fresh per group: GroupPanel is keyed on groupId, so switching groups
   // remounts this form with the new name rather than needing a reseed effect.
   const [name, setName] = useState(group.name)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [saved, setSaved] = useState(false)
+  const [status, setStatus] = useState<
+    'idle' | 'saving' | 'saved' | { error: string }
+  >('idle')
+  // The last value we know is persisted, so we only save real changes (and
+  // don't re-fire after onRenamed refreshes the group name back to us).
+  const savedName = useRef(group.name)
 
-  const trimmed = name.trim()
-  const dirty = trimmed !== group.name && trimmed.length > 0
-
-  async function submit() {
-    if (!dirty) return
-    setSaving(true)
-    setError('')
-    setSaved(false)
-    try {
-      await renameGroup(group.groupId, trimmed)
-      await onRenamed()
-      setSaved(true)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Rename failed')
-    } finally {
-      setSaving(false)
+  useEffect(() => {
+    const trimmed = name.trim()
+    if (trimmed === savedName.current) return
+    if (!trimmed) {
+      setStatus({ error: 'Group name can’t be empty' })
+      return
     }
-  }
+    const t = setTimeout(async () => {
+      setStatus('saving')
+      try {
+        await renameGroup(group.groupId, trimmed)
+        savedName.current = trimmed
+        await onRenamed()
+        setStatus('saved')
+      } catch (err) {
+        setStatus({ error: err instanceof Error ? err.message : 'Rename failed' })
+      }
+    }, 700)
+    return () => clearTimeout(t)
+  }, [name, group.groupId, onRenamed])
 
   return (
     <label className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
-      Group name
-      <div className="flex gap-2">
-        <input
-          value={name}
-          onChange={(e) => {
-            setName(e.target.value)
-            setSaved(false)
-          }}
-          className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
-        />
-        <button
-          onClick={submit}
-          disabled={saving || !dirty}
-          className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-        >
-          {saving ? 'Saving…' : 'Rename'}
-        </button>
-      </div>
-      {error && <p className="text-xs normal-case text-red-400">{error}</p>}
-      {saved && !dirty && (
-        <p className="text-xs normal-case text-emerald-500">Group renamed</p>
-      )}
+      <span className="flex items-center justify-between">
+        Group name
+        <RenameStatus status={status} />
+      </span>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        className="min-w-0 rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-zinc-500 focus:outline-none"
+      />
     </label>
   )
+}
+
+function RenameStatus({
+  status,
+}: {
+  status: 'idle' | 'saving' | 'saved' | { error: string }
+}) {
+  if (status === 'saving')
+    return <span className="normal-case text-zinc-500">Saving…</span>
+  if (status === 'saved')
+    return <span className="normal-case text-emerald-500">Saved</span>
+  if (typeof status === 'object')
+    return <span className="normal-case text-red-400">{status.error}</span>
+  return null
 }
 
 // Reusable "name a new group and create it" form. Used both for a member's
