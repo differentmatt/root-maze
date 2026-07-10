@@ -11,8 +11,10 @@ import {
   requireMember,
   listGroupsForAccount,
   createGroup,
+  renameGroup,
   ForbiddenError,
 } from '../lib/groups.js'
+import { ValidationError } from '../lib/errors.js'
 
 describe('requireMember', () => {
   beforeEach(() => {
@@ -89,5 +91,70 @@ describe('createGroup', () => {
       .find((i) => typeof i.SK === 'string' && i.SK.startsWith('LOG#'))
     expect(log.action).toBe('create')
     expect(log.entityType).toBe('group')
+  })
+})
+
+describe('renameGroup', () => {
+  beforeEach(() => {
+    vi.mocked(getItem).mockReset()
+    vi.mocked(putItem).mockReset().mockResolvedValue(true)
+  })
+
+  it('patches the group name and appends an update log', async () => {
+    vi.mocked(getItem).mockResolvedValueOnce({
+      PK: 'GROUP#g1',
+      SK: 'META',
+      groupId: 'g1',
+      name: 'Old',
+      deletedAt: null,
+    })
+
+    const result = await renameGroup('g1', 'acc_1', '  New Name  ')
+
+    expect(result).toEqual({ groupId: 'g1', name: 'New Name' })
+    const meta = vi
+      .mocked(putItem)
+      .mock.calls.map((c) => c[0])
+      .find((i) => i.SK === 'META')
+    expect(meta.name).toBe('New Name')
+    expect(meta.updatedBy).toBe('acc_1')
+
+    const log = vi
+      .mocked(putItem)
+      .mock.calls.map((c) => c[0])
+      .find((i) => typeof i.SK === 'string' && i.SK.startsWith('LOG#'))
+    expect(log.action).toBe('update')
+    expect(log.entityType).toBe('group')
+    expect(log.before).toEqual({ name: 'Old' })
+    expect(log.after).toEqual({ name: 'New Name' })
+  })
+
+  it('returns not_found for a missing or deleted group', async () => {
+    vi.mocked(getItem).mockResolvedValueOnce(null)
+    expect(await renameGroup('gx', 'acc_1', 'Name')).toBe('not_found')
+
+    vi.mocked(getItem).mockResolvedValueOnce({ name: 'X', deletedAt: '2026-01-01' })
+    expect(await renameGroup('gx', 'acc_1', 'Name')).toBe('not_found')
+  })
+
+  it('is a no-op write when the name is unchanged', async () => {
+    vi.mocked(getItem).mockResolvedValueOnce({
+      SK: 'META',
+      groupId: 'g1',
+      name: 'Same',
+      deletedAt: null,
+    })
+    const result = await renameGroup('g1', 'acc_1', 'Same')
+    expect(result).toEqual({ groupId: 'g1', name: 'Same' })
+    expect(putItem).not.toHaveBeenCalled()
+  })
+
+  it('rejects an empty or over-long name', async () => {
+    await expect(renameGroup('g1', 'acc_1', '   ')).rejects.toBeInstanceOf(
+      ValidationError,
+    )
+    await expect(renameGroup('g1', 'acc_1', 'x'.repeat(101))).rejects.toBeInstanceOf(
+      ValidationError,
+    )
   })
 })

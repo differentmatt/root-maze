@@ -17,6 +17,7 @@ import {
   type Role,
   type PersonNode,
 } from '../api'
+import PersonPicker from '../components/PersonPicker'
 
 type Status = 'loading' | 'ready' | 'error'
 
@@ -112,6 +113,11 @@ export default function MembersPanel({ group }: { group: Group }) {
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium text-zinc-300">Members</h2>
+        <p className="text-xs text-zinc-500">
+          Link each member to their person in the tree so everyone knows who’s
+          who. You can also claim your own person from the tree with “This is
+          me”.
+        </p>
         <ul className="flex flex-col gap-2">
           {members.map((m) => (
             <li
@@ -278,32 +284,17 @@ function MemberLink({
 
   return (
     <div className="flex items-center gap-2">
-      <label className="text-xs text-zinc-500">Person</label>
-      <div className="relative min-w-0 flex-1">
-        <select
-          aria-label={`Linked person for ${member.name || member.email || member.accountId}`}
-          value={member.linkedNodeId ?? ''}
+      <label className="shrink-0 text-xs text-zinc-500">Person</label>
+      <div className="min-w-0 flex-1">
+        <PersonPicker
+          ariaLabel={`Linked person for ${member.name || member.email || member.accountId}`}
+          options={candidates.map((n) => ({ id: n.nodeId, label: n.name }))}
+          value={member.linkedNodeId ?? null}
           disabled={busy || disabled}
-          onChange={(e) => (e.target.value ? onLink(e.target.value) : onUnlink())}
-          className="w-full appearance-none rounded-md border border-zinc-700 bg-zinc-950 py-1 pl-2 pr-7 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-40"
-        >
-          <option value="">— not linked —</option>
-          {candidates.map((n) => (
-            <option key={n.nodeId} value={n.nodeId}>
-              {n.name}
-            </option>
-          ))}
-        </select>
-        <span
-          aria-hidden
-          className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-zinc-400"
-        >
-          {busy ? (
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent" />
-          ) : (
-            '▼'
-          )}
-        </span>
+          clearLabel="— not linked —"
+          placeholder="Link a person…"
+          onChange={(id) => (id ? onLink(id) : onUnlink())}
+        />
       </div>
       {busy && <span className="shrink-0 text-xs text-zinc-500">Saving…</span>}
     </div>

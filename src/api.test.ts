@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getMe, createGroup, ApiError } from './api'
+import { getMe, createGroup, renameGroup, ApiError } from './api'
 import { setCredential, getCredential } from './auth'
 
 describe('api', () => {
@@ -40,6 +40,22 @@ describe('api', () => {
     const [, init] = fetchMock.mock.calls[0]
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body)).toEqual({ name: 'Fam' })
+  })
+
+  it('PATCHes the group name when renaming', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ groupId: 'g1', name: 'New' }), {
+        status: 200,
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await renameGroup('g1', 'New')
+    expect(result).toEqual({ groupId: 'g1', name: 'New' })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/groups/g1')
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body)).toEqual({ name: 'New' })
   })
 
   it('clears the credential and throws on 401', async () => {

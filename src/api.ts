@@ -58,6 +58,19 @@ export function createGroup(name: string): Promise<Group> {
   return request<Group>('POST', '/groups', { name })
 }
 
+// Rename a group. Any member may rename (membership management is deliberately
+// low-friction); the server enforces membership and a ≤100-char name.
+export function renameGroup(
+  groupId: string,
+  name: string,
+): Promise<{ groupId: string; name: string }> {
+  return request<{ groupId: string; name: string }>(
+    'PATCH',
+    `/groups/${groupId}`,
+    { name },
+  )
+}
+
 // --- Phase 1: people (person_node) and relationships (edge) ---
 
 export interface PersonNode {
