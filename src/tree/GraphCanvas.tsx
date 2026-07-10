@@ -26,6 +26,7 @@ export default function GraphCanvas({
   onSelect,
   isFull,
   onFullscreenChange,
+  meNodeId,
 }: {
   nodes: PersonNode[]
   edges: Edge[]
@@ -33,6 +34,9 @@ export default function GraphCanvas({
   onSelect: (nodeId: string) => void
   isFull: boolean
   onFullscreenChange: (next: boolean) => void
+  // The person the signed-in user has claimed as themselves, highlighted so
+  // they can find their place in the tree at a glance.
+  meNodeId?: string | null
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 })
@@ -254,6 +258,8 @@ export default function GraphCanvas({
             const p = pos[n.nodeId]
             if (!p) return null
             const selected = n.nodeId === selectedId
+            const isMe = meNodeId != null && n.nodeId === meNodeId
+            const linked = Boolean(n.accountId)
             return (
               <g
                 key={n.nodeId}
@@ -267,16 +273,29 @@ export default function GraphCanvas({
                 }}
                 tabIndex={0}
                 role="button"
-                aria-label={n.name}
+                aria-label={isMe ? `${n.name} (you)` : n.name}
                 aria-pressed={selected}
                 className="cursor-pointer"
               >
+                {/* Emerald ring marks the signed-in user's own node. */}
+                {isMe && (
+                  <circle
+                    r={NODE_R + 4}
+                    fill="none"
+                    stroke="#34d399"
+                    strokeWidth={2}
+                  />
+                )}
                 <circle
                   r={NODE_R}
                   fill={selected ? '#f4f4f5' : '#27272a'}
                   stroke={selected ? '#f4f4f5' : '#52525b'}
                   strokeWidth={2}
                 />
+                {/* A small dot flags people already claimed by a member. */}
+                {linked && !isMe && (
+                  <circle cx={NODE_R - 4} cy={-NODE_R + 4} r={3.5} fill="#34d399" />
+                )}
                 <text
                   y={34}
                   textAnchor="middle"

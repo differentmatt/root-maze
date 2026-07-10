@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import type { Graph } from '../api'
 import TreeView from './TreeView'
@@ -8,14 +8,17 @@ import { inferSiblings } from './siblings'
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api')>()),
   getGraph: vi.fn(),
+  getMembers: vi.fn(),
   createNode: vi.fn(),
   updateNode: vi.fn(),
   deleteNode: vi.fn(),
   createEdge: vi.fn(),
   deleteEdge: vi.fn(),
+  linkPersonNode: vi.fn(),
+  unlinkPersonNode: vi.fn(),
 }))
 
-import { getGraph, updateNode, deleteNode } from '../api'
+import { getGraph, getMembers, updateNode, deleteNode, linkPersonNode } from '../api'
 
 const group = { groupId: 'grp_1', name: 'The Lotts', role: 'owner' }
 
@@ -52,6 +55,12 @@ const graph: Graph = {
     },
   ],
 }
+
+// TreeView fetches members alongside the graph (for who's who); default to an
+// empty roster so the graph drives each test unless overridden.
+beforeEach(() => {
+  vi.mocked(getMembers).mockResolvedValue({ members: [], me: 'acc_1' })
+})
 
 afterEach(() => {
   cleanup()
@@ -122,6 +131,48 @@ describe('TreeView', () => {
         ),
       { timeout: 2000 },
     )
+  })
+
+  it('claims a person as yourself via "This is me"', async () => {
+    vi.mocked(getGraph).mockResolvedValue(graph)
+    vi.mocked(linkPersonNode).mockResolvedValue({ accountId: 'acc_1', nodeId: 'nod_a' })
+    render(<TreeView group={group} />)
+
+    await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Ada'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'This is me' }))
+    await waitFor(() =>
+      expect(linkPersonNode).toHaveBeenCalledWith('grp_1', 'acc_1', 'nod_a'),
+    )
+  })
+
+  it('hides "This is me" when the caller is already linked elsewhere', async () => {
+    vi.mocked(getGraph).mockResolvedValue(graph)
+    // The caller is already linked to Bo, so Ada must not offer "This is me".
+    vi.mocked(getMembers).mockResolvedValue({
+      members: [
+        {
+          accountId: 'acc_1',
+          role: 'owner',
+          email: 'a@b.com',
+          name: 'Ann',
+          joinedAt: 't',
+          linkedNodeId: 'nod_b',
+          linkedNodeName: 'Bo',
+        },
+      ],
+      me: 'acc_1',
+    })
+    render(<TreeView group={group} />)
+
+    await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Ada'))
+
+    expect(
+      screen.queryByRole('button', { name: 'This is me' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText(/Unlink there first/)).toBeInTheDocument()
   })
 
   it('requires confirmation before deleting a person', async () => {

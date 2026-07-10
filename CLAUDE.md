@@ -19,7 +19,7 @@ to add and view people and relationships. Soft-delete, `updatedAt`/`updatedBy`,
 and the nullable `accountId` on nodes are all preserved; deleting a person
 cascade-soft-deletes the edges that touch it.
 
-**Phase 2 (current): membership & invites.** A group can now have more than its
+**Phase 2 (done): membership & invites.** A group can now have more than its
 creator. Members are `owner` or `editor` (a group always keeps ≥1 owner — the
 last owner can't be removed or demoted). Sharing is via **invite links**: a
 member mints an `INVITE#<token>` item (256-bit CSPRNG token, default 7-day
@@ -31,6 +31,22 @@ requires signing in and always grants `editor` (never owner). Any member may
 manage membership and invites — deliberately low-friction for a casual family
 app. Every write keeps soft-delete, `updatedAt`/`updatedBy`, and the append-only
 edit log.
+
+**Phase 3 (current): identity linking.** Connect a signed-in account to a person
+in the tree. The link lives on `person_node.accountId` — a member claims a node
+as themselves ("This is me"), and the members + tree UI surface who's who (the
+caller's own node gets an emerald ring; claimed nodes get a dot). Integrity is
+enforced server-side in `lib/links.js`: a node links to at most one account
+(claiming an already-claimed node is a `409`), and an account to at most one node
+per group (re-linking *moves* the link, clearing the old node). `accountId` is no
+longer directly writable via a plain node write — all linking goes through
+`PUT`/`DELETE /api/groups/{groupId}/members/{accountId}/link` (backed by the
+`links` handler). **Permissions:** a member links/unlinks their *own* account
+freely; linking/unlinking *another* member's is owner-only. Accepting an invite
+optionally offers a "which person are you?" link-on-join step (skippable). Also
+adds the "New group" affordance — create a second group you own from the
+workspace (the backend already allowed it). Every link/unlink preserves
+soft-delete, `updatedAt`/`updatedBy`, and appends `link`/`unlink` edit-log rows.
 
 ## Commands
 
@@ -70,7 +86,7 @@ edit log.
 | Group         | `GROUP#<groupId>`     | `META`            | soft-delete via `deletedAt` |
 | Membership    | `GROUP#<groupId>`     | `MEMBER#<acct>`   | `role: owner \| editor`; `GSI1PK=ACCOUNT#<acct>`, `GSI1SK=GROUP#<groupId>` |
 | invite        | `GROUP#<groupId>`     | `INVITE#<token>`  | `role`, `expiresAt`, `maxUses`, `useCount`; `GSI1PK=INVITE#<token>`, `GSI1SK=GROUP#<groupId>` (token → group) |
-| person_node   | `GROUP#<groupId>`     | `NODE#<nodeId>`   | nullable `accountId` (later identity linking) |
+| person_node   | `GROUP#<groupId>`     | `NODE#<nodeId>`   | nullable `accountId` = the linked member (Phase 3); set only via the link endpoint, not a plain node write |
 | edge          | `GROUP#<groupId>`     | `EDGE#<edgeId>`   | `edgeKind: parent_child \| partner` |
 | edit_log      | `GROUP#<groupId>`     | `LOG#<ulid>`      | append-only, never mutated |
 
@@ -85,18 +101,25 @@ Phase 2 membership & invite routes:
 `DELETE /api/groups/{groupId}/invites/{token}`, and the token-addressed
 `GET /api/invites/{token}` (public preview) + `POST /api/invites/{token}/accept`.
 
+Phase 3 identity-linking routes (backed by the `links` handler):
+`PUT/DELETE /api/groups/{groupId}/members/{accountId}/link` (`PUT` body
+`{ nodeId }`). The members list (`GET .../members`) is enriched with each
+member's `linkedNodeId`/`linkedNodeName`.
+
 ## Key files
 
 - `src/App.tsx` — sign-in → group state → tree/members workspace; also the
   `/?invite=<token>` join route
 - `src/tree/` — `TreeView` (group screen), `GraphCanvas` + `layout` (SVG graph)
-- `src/members/` — `MembersPanel` (members + invite links), `JoinScreen` (accept)
+- `src/members/` — `MembersPanel` (members + invite links + who's-who linking),
+  `JoinScreen` (accept + optional link-on-join)
 - `src/auth.ts`, `src/api.ts` — client auth state + fetch wrapper
 - `backend/lib/` — `auth`, `dynamo`, `accounts`, `groups` (incl. membership
-  management), `invites`, `nodes`, `edges`, `graph`, `http` (auth+membership
-  gate), `ids`, `errors`, `response`
+  management), `invites`, `links` (identity linking), `nodes`, `edges`, `graph`,
+  `http` (auth+membership gate; returns the caller's membership row), `ids`,
+  `errors`, `response`
 - `backend/handlers/` — `me`, `groups`, `graph`, `nodes`, `edges`, `members`,
-  `invites`
+  `invites`, `links`
 - `infra/template.yaml` — one CloudFormation template, two stacks
 - `scripts/setup.sh` — one-time bootstrap (run in AWS CloudShell)
 - `.github/workflows/deploy.yml` — branch-routed deploy

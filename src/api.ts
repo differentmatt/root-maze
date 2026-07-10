@@ -179,6 +179,10 @@ export interface Member {
   email: string | null
   name: string | null
   joinedAt: string
+  // Phase 3: the person_node this member is linked to (their "this is me"), or
+  // null if they haven't claimed anyone in the tree yet.
+  linkedNodeId: string | null
+  linkedNodeName: string | null
 }
 
 export interface MembersResult {
@@ -273,4 +277,24 @@ export function acceptInvite(
 // Build a shareable invite URL from a token, pointing at this app's origin.
 export function inviteUrl(token: string): string {
   return `${window.location.origin}/?invite=${encodeURIComponent(token)}`
+}
+
+// --- Phase 3: identity linking (account <-> person_node) ---
+
+// Link a member's account to a person in the tree. A member may link their own
+// account; linking another member's account is owner-only (enforced server-side).
+export function linkPersonNode(
+  groupId: string,
+  accountId: string,
+  nodeId: string,
+): Promise<{ accountId: string; nodeId: string }> {
+  return request('PUT', `/groups/${groupId}/members/${accountId}/link`, { nodeId })
+}
+
+// Remove a member's link to whatever person they're currently claiming.
+export function unlinkPersonNode(
+  groupId: string,
+  accountId: string,
+): Promise<{ accountId: string; nodeId: string; unlinked: boolean }> {
+  return request('DELETE', `/groups/${groupId}/members/${accountId}/link`)
 }

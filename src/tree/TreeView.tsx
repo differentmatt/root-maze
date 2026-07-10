@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getGraph,
+  getMembers,
   createNode,
   updateNode,
   deleteNode,
   createEdge,
   deleteEdge,
+  linkPersonNode,
+  unlinkPersonNode,
   SUBTYPES,
   ApiError,
   type Group,
@@ -13,6 +16,7 @@ import {
   type PersonNode,
   type Edge,
   type EdgeInput,
+  type Member,
 } from '../api'
 import GraphCanvas from './GraphCanvas'
 import { inferSiblings, type InferredSibling } from './siblings'
@@ -58,14 +62,23 @@ function buildEdgeInput(
 // their relationships, or remove them.
 export default function TreeView({ group }: { group: Group }) {
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] })
+  const [members, setMembers] = useState<Member[]>([])
+  const [me, setMe] = useState('')
   const [status, setStatus] = useState<Status>({ state: 'loading' })
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isFull, setIsFull] = useState(false)
 
   const reload = useCallback(async () => {
     try {
-      const g = await getGraph(group.groupId)
+      // Members come along so the tree can show who's who (which node each
+      // signed-in account has claimed) and offer the "this is me" control.
+      const [g, m] = await Promise.all([
+        getGraph(group.groupId),
+        getMembers(group.groupId),
+      ])
       setGraph(g)
+      setMembers(m.members)
+      setMe(m.me)
       setStatus({ state: 'ready' })
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return
@@ -75,6 +88,15 @@ export default function TreeView({ group }: { group: Group }) {
       })
     }
   }, [group.groupId])
+
+  const memberById = useMemo(() => {
+    const o: Record<string, Member> = {}
+    for (const m of members) o[m.accountId] = m
+    return o
+  }, [members])
+  const myMember = memberById[me]
+  const isOwner = myMember?.role === 'owner'
+  const myNodeId = myMember?.linkedNodeId ?? null
 
   useEffect(() => {
     setStatus({ state: 'loading' })
@@ -121,6 +143,7 @@ export default function TreeView({ group }: { group: Group }) {
             onSelect={selectPerson}
             isFull={isFull}
             onFullscreenChange={setIsFull}
+            meNodeId={myNodeId}
           />
 
           <Legend />
@@ -133,6 +156,9 @@ export default function TreeView({ group }: { group: Group }) {
               groupId={group.groupId}
               person={selected}
               graph={graph}
+              me={me}
+              memberById={memberById}
+              isOwner={isOwner}
               onChanged={reload}
               onDeleted={() => {
                 setSelectedId(null)
@@ -181,6 +207,14 @@ function Legend() {
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-zinc-400" />{' '}
         ended
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-3 rounded-full border-2 border-emerald-400" />{' '}
+        you
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" /> claimed by a
+        member
       </span>
     </div>
   )
@@ -350,6 +384,9 @@ function PersonPanel({
   groupId,
   person,
   graph,
+  me,
+  memberById,
+  isOwner,
   onChanged,
   onDeleted,
   onClose,
@@ -357,6 +394,9 @@ function PersonPanel({
   groupId: string
   person: PersonNode
   graph: Graph
+  me: string
+  memberById: Record<string, Member>
+  isOwner: boolean
   onChanged: () => void
   onDeleted: () => void
   onClose: () => void
@@ -472,6 +512,15 @@ function PersonPanel({
         />
       </Field>
 
+      <LinkSection
+        groupId={groupId}
+        person={person}
+        me={me}
+        memberById={memberById}
+        isOwner={isOwner}
+        onChanged={onChanged}
+      />
+
       <div className="border-t border-zinc-800 pt-3">
         <p className="mb-2 text-sm font-medium text-zinc-300">Relationships</p>
         <RelationshipsSection
@@ -504,6 +553,19 @@ function SaveStatus({ save }: { save: SaveState }) {
   return null
 }
 
+// Small inline spinner for in-progress buttons. `dark` flips it for use on a
+// light (primary) button; otherwise it inherits the current text color.
+function Spinner({ dark }: { dark?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-t-transparent ${
+        dark ? 'border-zinc-900/60' : 'border-current'
+      }`}
+    />
+  )
+}
+
 // Labelled field — the native date picker ignores placeholder text, so a label
 // is the only reliable way to say what each input is.
 function Field({
@@ -518,6 +580,106 @@ function Field({
       {label}
       {children}
     </label>
+  )
+}
+
+// "This is me": claim (or release) a person as the signed-in account. A member
+// manages their own link freely; owners can additionally unlink anyone (to fix
+// a wrong claim). This UI hides "This is me" once you're already linked, so
+// re-linking yourself here means unlinking first and then claiming the new one.
+function LinkSection({
+  groupId,
+  person,
+  me,
+  memberById,
+  isOwner,
+  onChanged,
+}: {
+  groupId: string
+  person: PersonNode
+  me: string
+  memberById: Record<string, Member>
+  isOwner: boolean
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const linkedAccountId = person.accountId
+  const linkedMember = linkedAccountId ? memberById[linkedAccountId] : null
+  const isMe = linkedAccountId != null && linkedAccountId === me
+  const myNodeId = memberById[me]?.linkedNodeId ?? null
+
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true)
+    setError(null)
+    try {
+      await fn()
+      onChanged()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Action failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="border-t border-zinc-800 pt-3">
+      <p className="mb-2 text-sm font-medium text-zinc-300">Identity</p>
+      {linkedAccountId ? (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm text-zinc-300">
+            {isMe ? (
+              <>
+                This is <span className="text-emerald-400">you</span>
+              </>
+            ) : (
+              <>
+                Linked to{' '}
+                <span className="text-zinc-100">
+                  {linkedMember?.name || linkedMember?.email || 'a member'}
+                </span>
+              </>
+            )}
+          </p>
+          {(isMe || isOwner) && (
+            <button
+              onClick={() => run(() => unlinkPersonNode(groupId, linkedAccountId))}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
+            >
+              {busy && <Spinner />}
+              {busy ? 'Unlinking…' : 'Unlink'}
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm text-zinc-400">No one has claimed this person yet.</p>
+            {/* Only offer "This is me" to a caller who hasn't claimed anyone yet;
+                once linked, they unlink from their own node before re-claiming. */}
+            {!myNodeId && (
+              <button
+                onClick={() => run(() => linkPersonNode(groupId, me, person.nodeId))}
+                disabled={busy}
+                className={`flex items-center gap-1.5 ${primaryBtn}`}
+              >
+                {busy && <Spinner dark />}
+                {busy ? 'Linking…' : 'This is me'}
+              </button>
+            )}
+          </div>
+          {myNodeId && myNodeId !== person.nodeId && (
+            <p className="text-xs text-zinc-500">
+              You're linked to someone else. Unlink there first to claim this
+              person.
+            </p>
+          )}
+        </div>
+      )}
+      {error && <p className="mt-1 text-sm text-red-400">{error}</p>}
+    </div>
   )
 }
 

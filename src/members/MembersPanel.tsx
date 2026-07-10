@@ -7,11 +7,15 @@ import {
   createInvite,
   revokeInvite,
   inviteUrl,
+  getGraph,
+  linkPersonNode,
+  unlinkPersonNode,
   ApiError,
   type Group,
   type Member,
   type Invite,
   type Role,
+  type PersonNode,
 } from '../api'
 
 type Status = 'loading' | 'ready' | 'error'
@@ -25,17 +29,29 @@ export default function MembersPanel({ group }: { group: Group }) {
   const [error, setError] = useState('')
   const [members, setMembers] = useState<Member[]>([])
   const [me, setMe] = useState('')
+  const [nodes, setNodes] = useState<PersonNode[]>([])
   const [invites, setInvites] = useState<Invite[]>([])
   const [busy, setBusy] = useState(false)
+  // Which member's link is mid-flight, so only that row shows a spinner.
+  const [linkBusyId, setLinkBusyId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
 
-  const load = useCallback(async () => {
-    setStatus('loading')
+  // On a refresh (silent) we keep the panel on screen instead of flashing the
+  // full "Loading…" state, so a link/role change feels in-place.
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setStatus('loading')
     try {
-      const [m, i] = await Promise.all([getMembers(groupId), getInvites(groupId)])
+      // The graph comes along so we can offer a "which person is this member?"
+      // picker built from the group's people.
+      const [m, i, g] = await Promise.all([
+        getMembers(groupId),
+        getInvites(groupId),
+        getGraph(groupId),
+      ])
       setMembers(m.members)
       setMe(m.me)
       setInvites(i.invites)
+      setNodes(g.nodes)
       setStatus('ready')
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return
@@ -48,17 +64,31 @@ export default function MembersPanel({ group }: { group: Group }) {
     load()
   }, [load])
 
-  // Run a mutation, surface any error, then reload the panel.
+  // Run a mutation, surface any error, then silently reload the panel.
   async function run(fn: () => Promise<unknown>) {
     setBusy(true)
     setNotice('')
     try {
       await fn()
-      await load()
+      await load(true)
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Action failed')
     } finally {
       setBusy(false)
+    }
+  }
+
+  // Like `run`, but scoped to one member's link so that row can show progress.
+  async function runLink(accountId: string, fn: () => Promise<unknown>) {
+    setLinkBusyId(accountId)
+    setNotice('')
+    try {
+      await fn()
+      await load(true)
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Action failed')
+    } finally {
+      setLinkBusyId(null)
     }
   }
 
@@ -73,6 +103,8 @@ export default function MembersPanel({ group }: { group: Group }) {
     }
   }
 
+  const isOwner = members.find((m) => m.accountId === me)?.role === 'owner'
+
   if (status === 'loading') return <p className="text-zinc-400">Loading members…</p>
   if (status === 'error') return <p className="text-red-400">Error: {error}</p>
 
@@ -84,40 +116,57 @@ export default function MembersPanel({ group }: { group: Group }) {
           {members.map((m) => (
             <li
               key={m.accountId}
-              className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
+              className="flex flex-col gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2"
             >
-              <div className="min-w-0">
-                <p className="truncate text-sm text-zinc-100">
-                  {m.name || m.email || m.accountId}
-                  {m.accountId === me && (
-                    <span className="ml-1 text-xs text-zinc-500">(you)</span>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm text-zinc-100">
+                    {m.name || m.email || m.accountId}
+                    {m.accountId === me && (
+                      <span className="ml-1 text-xs text-zinc-500">(you)</span>
+                    )}
+                  </p>
+                  {m.email && m.name && (
+                    <p className="truncate text-xs text-zinc-500">{m.email}</p>
                   )}
-                </p>
-                {m.email && m.name && (
-                  <p className="truncate text-xs text-zinc-500">{m.email}</p>
-                )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <select
+                    aria-label={`Role for ${m.name || m.email || m.accountId}`}
+                    value={m.role}
+                    disabled={busy}
+                    onChange={(e) =>
+                      run(() => changeMemberRole(groupId, m.accountId, e.target.value as Role))
+                    }
+                    className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-40"
+                  >
+                    <option value="owner">owner</option>
+                    <option value="editor">editor</option>
+                  </select>
+                  <button
+                    onClick={() => run(() => removeMember(groupId, m.accountId))}
+                    disabled={busy}
+                    className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-red-400 hover:border-red-500/50 disabled:opacity-40"
+                  >
+                    {m.accountId === me ? 'Leave' : 'Remove'}
+                  </button>
+                </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <select
-                  aria-label={`Role for ${m.name || m.email || m.accountId}`}
-                  value={m.role}
-                  disabled={busy}
-                  onChange={(e) =>
-                    run(() => changeMemberRole(groupId, m.accountId, e.target.value as Role))
-                  }
-                  className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-40"
-                >
-                  <option value="owner">owner</option>
-                  <option value="editor">editor</option>
-                </select>
-                <button
-                  onClick={() => run(() => removeMember(groupId, m.accountId))}
-                  disabled={busy}
-                  className="rounded-md border border-zinc-700 px-2 py-1 text-xs text-red-400 hover:border-red-500/50 disabled:opacity-40"
-                >
-                  {m.accountId === me ? 'Leave' : 'Remove'}
-                </button>
-              </div>
+              <MemberLink
+                member={m}
+                nodes={nodes}
+                canEdit={m.accountId === me || isOwner}
+                busy={linkBusyId === m.accountId}
+                disabled={busy || (linkBusyId !== null && linkBusyId !== m.accountId)}
+                onLink={(nodeId) =>
+                  runLink(m.accountId, () =>
+                    linkPersonNode(groupId, m.accountId, nodeId),
+                  )
+                }
+                onUnlink={() =>
+                  runLink(m.accountId, () => unlinkPersonNode(groupId, m.accountId))
+                }
+              />
             </li>
           ))}
         </ul>
@@ -182,6 +231,81 @@ export default function MembersPanel({ group }: { group: Group }) {
           {notice}
         </p>
       )}
+    </div>
+  )
+}
+
+// Which person in the tree a member is. Editable by the member themselves, or by
+// an owner (matching the server-side rule); everyone else just sees the status.
+// The picker offers unclaimed people plus the member's current person, so it
+// can't accidentally steal someone else's link.
+function MemberLink({
+  member,
+  nodes,
+  canEdit,
+  busy,
+  disabled,
+  onLink,
+  onUnlink,
+}: {
+  member: Member
+  nodes: PersonNode[]
+  canEdit: boolean
+  // `busy` = this member's link is mid-flight (show a spinner); `disabled` =
+  // some other action is running, so lock the control without a spinner.
+  busy: boolean
+  disabled: boolean
+  onLink: (nodeId: string) => void
+  onUnlink: () => void
+}) {
+  const candidates = nodes.filter(
+    (n) => !n.accountId || n.accountId === member.accountId,
+  )
+
+  if (!canEdit) {
+    return (
+      <p className="text-xs text-zinc-500">
+        {member.linkedNodeName ? (
+          <>
+            Linked to <span className="text-zinc-300">{member.linkedNodeName}</span>
+          </>
+        ) : (
+          'Not linked to a person'
+        )}
+      </p>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <label className="text-xs text-zinc-500">Person</label>
+      <div className="relative min-w-0 flex-1">
+        <select
+          aria-label={`Linked person for ${member.name || member.email || member.accountId}`}
+          value={member.linkedNodeId ?? ''}
+          disabled={busy || disabled}
+          onChange={(e) => (e.target.value ? onLink(e.target.value) : onUnlink())}
+          className="w-full appearance-none rounded-md border border-zinc-700 bg-zinc-950 py-1 pl-2 pr-7 text-xs text-zinc-100 focus:border-zinc-500 focus:outline-none disabled:opacity-40"
+        >
+          <option value="">— not linked —</option>
+          {candidates.map((n) => (
+            <option key={n.nodeId} value={n.nodeId}>
+              {n.name}
+            </option>
+          ))}
+        </select>
+        <span
+          aria-hidden
+          className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-zinc-400"
+        >
+          {busy ? (
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-transparent" />
+          ) : (
+            '▼'
+          )}
+        </span>
+      </div>
+      {busy && <span className="shrink-0 text-xs text-zinc-500">Saving…</span>}
     </div>
   )
 }

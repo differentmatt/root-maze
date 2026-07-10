@@ -1,5 +1,6 @@
 import { requireGroupMember } from '../lib/http.js'
 import { listMembers, removeMember, changeMemberRole } from '../lib/groups.js'
+import { linkedNodeMap } from '../lib/links.js'
 import { ValidationError } from '../lib/errors.js'
 import { ok, badRequest, notFound, conflict, serverError } from '../lib/response.js'
 
@@ -21,8 +22,18 @@ export async function handler(event) {
     const targetId = event.pathParameters?.accountId
 
     if (method === 'GET') {
-      const members = await listMembers(groupId)
-      return ok({ members, me: account.accountId })
+      // Enrich each member with the person_node they're linked to (if any), so
+      // the members UI can show "who's who" without a second round trip.
+      const [members, links] = await Promise.all([
+        listMembers(groupId),
+        linkedNodeMap(groupId),
+      ])
+      const enriched = members.map((m) => ({
+        ...m,
+        linkedNodeId: links[m.accountId]?.nodeId ?? null,
+        linkedNodeName: links[m.accountId]?.name ?? null,
+      }))
+      return ok({ members: enriched, me: account.accountId })
     }
 
     if (method === 'DELETE') {

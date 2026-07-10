@@ -9,6 +9,8 @@ import {
   previewInvite,
   acceptInvite,
   inviteUrl,
+  linkPersonNode,
+  unlinkPersonNode,
 } from '../api'
 import { setCredential, clearCredential } from '../auth'
 
@@ -118,5 +120,30 @@ describe('membership + invite api', () => {
 
   it('builds a shareable invite url from a token', () => {
     expect(inviteUrl('tok')).toContain('/?invite=tok')
+  })
+
+  it('links a member to a person (PUT with nodeId)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ accountId: 'acc_2', nodeId: 'nod_1' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await linkPersonNode('grp_1', 'acc_2', 'nod_1')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/groups/grp_1/members/acc_2/link')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body)).toEqual({ nodeId: 'nod_1' })
+  })
+
+  it('unlinks a member (DELETE)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ accountId: 'acc_2', nodeId: 'nod_1', unlinked: true }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await unlinkPersonNode('grp_1', 'acc_2')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/groups/grp_1/members/acc_2/link')
+    expect(init.method).toBe('DELETE')
   })
 })

@@ -80,9 +80,9 @@ describe('createNode', () => {
     )
   })
 
-  it('keeps a nullable accountId when provided', async () => {
+  it('ignores accountId on create — linking has its own endpoint', async () => {
     const node = await createNode('g1', 'acc_1', { name: 'Bo', accountId: 'acc_9' })
-    expect(node.accountId).toBe('acc_9')
+    expect(node.accountId).toBeNull()
   })
 })
 
