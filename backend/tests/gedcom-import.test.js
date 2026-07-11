@@ -112,6 +112,40 @@ describe('previewImport', () => {
     expect(preview.stats.alreadyInTree).toBe(2)
   })
 
+  it('detects an import parent as an existing no-surname parent via tree shape', async () => {
+    // The reported case: the tree has "Jim"/"Lyn" (no surname) as Matt's
+    // parents; importing "Jim Lott"/"Lyn Lott" (also Matt's parents) should
+    // merge into them via the shared-child structural signal, not add dupes.
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      node({ nodeId: 'm', firstName: 'Matt', middleName: 'McCabe', lastName: 'Lott', birthdate: '1979-05-01' }),
+      node({ nodeId: 'jim', firstName: 'Jim', lastName: null }),
+      node({ nodeId: 'lyn', firstName: 'Lyn', lastName: null }),
+    ])
+    vi.mocked(listEdges).mockResolvedValueOnce([
+      { edgeKind: 'parent_child', fromPerson: 'jim', toPerson: 'm', subtype: 'biological' },
+      { edgeKind: 'parent_child', fromPerson: 'lyn', toPerson: 'm', subtype: 'biological' },
+      { edgeKind: 'partner', fromPerson: 'jim', toPerson: 'lyn', subtype: 'partner' },
+    ])
+    const ged = `0 HEAD
+0 @I1@ INDI
+1 NAME Matt /Lott/
+1 BIRT
+2 DATE 1979
+0 @I5@ INDI
+1 NAME Jim /Lott/
+0 @I6@ INDI
+1 NAME Lyn /Lott/
+0 @F1@ FAM
+1 HUSB @I5@
+1 WIFE @I6@
+1 CHIL @I1@
+0 TRLR`
+    const preview = await previewImport('g1', ged)
+    expect(findPerson(preview, 'Matt Lott').suggestedNodeId).toBe('m')
+    expect(findPerson(preview, 'Jim Lott').suggestedNodeId).toBe('jim')
+    expect(findPerson(preview, 'Lyn Lott').suggestedNodeId).toBe('lyn')
+  })
+
   it('re-import: committed people are hidden, a previously-skipped one is reviewable', async () => {
     // Scenario: last time you imported this file, accepted Ada + William (now in
     // the tree, partnered) and skipped Zed (never created). Re-importing the
