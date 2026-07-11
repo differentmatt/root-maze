@@ -14,11 +14,6 @@ const partner = (
 
 type Layout = ReturnType<typeof computeRadialLayout>
 
-function nodeMap(layout: Layout) {
-  const m: Record<string, Layout['nodes'][number]> = {}
-  for (const n of layout.nodes) m[n.id] = n
-  return m
-}
 function wedgeMap(layout: Layout) {
   const m: Record<string, Layout['wedges'][number]> = {}
   for (const w of layout.wedges) m[w.id] = w
@@ -33,21 +28,19 @@ function wedgeMidY(w: Layout['wedges'][number]) {
 describe('computeRadialLayout', () => {
   it('returns an empty layout for no nodes', () => {
     const l = computeRadialLayout([], [], 'x')
-    expect(l.nodes).toEqual([])
-    expect(l.edges).toEqual([])
+    expect(l.focus).toBeNull()
     expect(l.wedges).toEqual([])
   })
 
   it('returns an empty layout when the focus is absent', () => {
-    expect(computeRadialLayout(['a'], [], 'ghost').nodes).toEqual([])
+    expect(computeRadialLayout(['a'], [], 'ghost').focus).toBeNull()
   })
 
   it('places the focus at the origin', () => {
-    const m = nodeMap(computeRadialLayout(['a'], [], 'a'))
-    expect(m.a.x).toBeCloseTo(0)
-    expect(m.a.y).toBeCloseTo(0)
-    expect(m.a.ring).toBe(0)
-    expect(m.a.role).toBe('focus')
+    const l = computeRadialLayout(['a'], [], 'a')
+    expect(l.focus?.id).toBe('a')
+    expect(l.focus?.x).toBeCloseTo(0)
+    expect(l.focus?.y).toBeCloseTo(0)
   })
 
   it('is deterministic for the same input', () => {
@@ -60,7 +53,7 @@ describe('computeRadialLayout', () => {
 
   it('ignores edges referencing absent nodes and self-loops', () => {
     const l = computeRadialLayout(['a', 'b'], [pc('a', 'ghost'), pc('a', 'a')], 'a')
-    expect(nodeMap(l).a).toBeDefined()
+    expect(l.focus?.id).toBe('a')
     expect(l.wedges.every((w) => Number.isFinite(w.a0) && Number.isFinite(w.r0))).toBe(
       true,
     )
@@ -160,7 +153,7 @@ describe('computeRadialLayout', () => {
     expect(wedgeMap(l).kid.subtype).toBe('adoptive')
   })
 
-  it('marks half-siblings of the focus', () => {
+  it('draws siblings as slices in the horizontal channel, half-siblings marked', () => {
     const ids = ['me', 'mom', 'dad', 'ofather', 'half', 'full']
     const edges = [
       pc('mom', 'me'),
@@ -170,11 +163,14 @@ describe('computeRadialLayout', () => {
       pc('mom', 'half'),
       pc('ofather', 'half'),
     ]
-    const m = nodeMap(computeRadialLayout(ids, edges, 'me'))
-    expect(m.full.role).toBe('sibling')
-    expect(m.full.half).toBe(false)
-    expect(m.half.role).toBe('sibling')
-    expect(m.half.half).toBe(true)
+    const w = wedgeMap(computeRadialLayout(ids, edges, 'me'))
+    expect(w.full.kind).toBe('sibling')
+    expect(w.full.half).toBeFalsy()
+    expect(w.half.kind).toBe('sibling')
+    expect(w.half.half).toBe(true)
+    // A sibling slice sits at ring 1 near the horizontal (small |y| at mid).
+    expect(w.full.ring).toBe(1)
+    expect(Math.abs(wedgeMidY(w.full))).toBeLessThan(w.full.r1)
   })
 
   it('re-roots cleanly when the focus changes', () => {
@@ -186,12 +182,11 @@ describe('computeRadialLayout', () => {
     expect(wedgeMap(computeRadialLayout(ids, edges, 'c')).a.ring).toBe(2)
   })
 
-  it('draws a partner with no shared children as a chord beside the focus', () => {
+  it('draws a childless partner as a spouse slice in the horizontal channel', () => {
     const l = computeRadialLayout(['a', 'b'], [partner('a', 'b')], 'a')
-    expect(nodeMap(l).b.role).toBe('spouse')
-    expect(l.edges.some((e) => e.relation === 'partner' && e.style === 'chord')).toBe(
-      true,
-    )
+    const b = wedgeMap(l).b
+    expect(b.kind).toBe('spouse')
+    expect(b.ring).toBe(1)
   })
 
   it('keeps descendant wedges at a ring within disjoint arcs', () => {
@@ -213,7 +208,7 @@ describe('computeRadialLayout', () => {
       [pc('a', 'b'), pc('d', 'e')],
       'a',
     )
-    const ids = [...l.nodes.map((n) => n.id), ...l.wedges.map((w) => w.id)]
+    const ids = [l.focus?.id, ...l.wedges.map((w) => w.id)]
     expect(ids).toContain('a')
     expect(ids).toContain('b')
     expect(ids).not.toContain('d')

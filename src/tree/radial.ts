@@ -36,60 +36,29 @@ export interface Point {
   y: number
 }
 
-export type NodeRole =
-  | 'focus'
-  | 'ancestor'
-  | 'descendant'
-  | 'sibling'
-  | 'spouse'
-
-export interface RadialNode {
+// The focus person, drawn as a disc at the very center of the chart. It's the
+// only non-wedge element; everyone else is a wedge.
+export interface FocusNode {
   id: string
   x: number
   y: number
-  // Generation distance from the focus: negative = ancestor (up), positive =
-  // descendant (down), 0 = the center cluster (focus, siblings, spouses).
-  ring: number
-  angle: number
-  role: NodeRole
-  // Half-sibling flag, set only for sibling nodes.
-  half?: boolean
 }
 
-// How an edge should be drawn:
-//   - 'radial'    a straight spoke between adjacent rings,
-//   - 'unionStem' a light stem tying a sibling to the focus,
-//   - 'chord'     a curved link (e.g. a childless partner beside the focus).
-export type RadialEdgeStyle = 'radial' | 'unionStem' | 'chord'
-
-export interface RadialEdge {
-  id: string
-  ax: number
-  ay: number
-  bx: number
-  by: number
-  // Present for curved edges (chords, union stems); the renderer draws a
-  // quadratic Bézier through it, else a straight line.
-  cx?: number
-  cy?: number
-  style: RadialEdgeStyle
-  relation: RadialEdgeKind
-  subtype?: string
-  ended?: boolean
-}
-
-// A person drawn as a filled arc segment (a fan-chart wedge) rather than a node:
-// adjacency is implied by nesting, so both fans are dense and crossing-free.
-// Angles are math-convention (0 = right, π/2 = up); the renderer flips y so
-// ancestors sweep the upper half and descendants the lower half.
+// A person drawn as a filled arc segment (a fan-chart wedge): adjacency is
+// implied by nesting, so the whole chart is dense and crossing-free. Angles are
+// math-convention (0 = right, π/2 = up); the renderer flips y so ancestors sweep
+// the upper half and descendants the lower half.
 //   - kind 'ancestor'   — a parent/grandparent, colored by ancestral branch.
 //   - kind 'descendant' — a child/grandchild, colored by descent line.
-//   - kind 'spouse'     — a thin band at the base of a union's children naming
-//                         the married-in co-parent (which a fan can't nest).
+//   - kind 'sibling'    — a slice in the horizontal channel beside the focus.
+//   - kind 'spouse'     — a married-in partner: a thin band at the base of a
+//                         union's children, or (childless) a slice in the
+//                         horizontal channel. A fan can't nest these, since a
+//                         spouse isn't a blood relative of the focus.
 // `lineage` groups a wedge into a branch for coloring; `subtype` is the
-// parent→child relationship (a step/adoptive link is styled distinctly);
-// `ended` marks a spouse band whose marriage has ended.
-export type WedgeKind = 'ancestor' | 'descendant' | 'spouse'
+// parent→child relationship (a step/adoptive link is styled distinctly); `half`
+// marks a half-sibling; `ended` marks a marriage that has ended.
+export type WedgeKind = 'ancestor' | 'descendant' | 'sibling' | 'spouse'
 
 export interface Wedge {
   id: string
@@ -101,12 +70,12 @@ export interface Wedge {
   ring: number
   lineage?: number
   subtype?: string
+  half?: boolean
   ended?: boolean
 }
 
 export interface RadialLayout {
-  nodes: RadialNode[]
-  edges: RadialEdge[]
+  focus: FocusNode | null
   wedges: Wedge[]
   // Content bounding box, so the canvas can fit the whole chart in view.
   minX: number
@@ -114,10 +83,6 @@ export interface RadialLayout {
   width: number
   height: number
 }
-
-// Spacing for the sibling nodes flanking the center (the one non-wedge element).
-const RING_GAP = 110
-const SIBLING_SPREAD = RING_GAP * 0.62
 
 // Wedge geometry. The focus is a disc of radius CENTER_R; each generation is a
 // ring of thickness *_BAND outward from it — ancestors across the upper half,
@@ -134,12 +99,14 @@ const DESC_A0 = Math.PI * 1.1
 const DESC_A1 = Math.PI * 1.9
 // Thickness of the spouse band drawn at the inner edge of a union's children.
 const SPOUSE_BAND = 13
+// The clear channel on each side (a fraction of the horizontal gap) that the
+// focus's siblings / childless partners fill as ring-1 slices.
+const CHANNEL_MARGIN = Math.PI * 0.02
 // Fan depth cap (generations drawn as wedges, either direction).
 const MAX_RING = 8
 
 const EMPTY: RadialLayout = {
-  nodes: [],
-  edges: [],
+  focus: null,
   wedges: [],
   minX: 0,
   minY: 0,
@@ -235,70 +202,16 @@ export function computeRadialLayout(
   }
   const descLeaves = leafMemo(new Map(), sortedChildren)
 
-  const nodes: RadialNode[] = []
-  const edgeList: RadialEdge[] = []
   const wedges: Wedge[] = []
-  const posOf = new Map<string, Point>()
-  const placed = new Set<string>()
-  let seq = 0
+  const placed = new Set<string>([focusId])
   let lineageSeq = 0
-
-  const place = (id: string, ring: number, angle: number, role: NodeRole, half?: boolean) => {
-    const radius = Math.abs(ring) * RING_GAP
-    const p = polar(radius, angle)
-    posOf.set(id, p)
-    placed.add(id)
-    nodes.push({ id, x: p.x, y: p.y, ring, angle, role, half })
-    return p
-  }
-  const placeAt = (id: string, p: Point, ring: number, angle: number, role: NodeRole, half?: boolean) => {
-    posOf.set(id, p)
-    placed.add(id)
-    nodes.push({ id, x: p.x, y: p.y, ring, angle, role, half })
-    return p
-  }
-  const addEdge = (
-    a: Point,
-    b: Point,
-    style: RadialEdgeStyle,
-    relation: RadialEdgeKind,
-    opts: { subtype?: string; ended?: boolean; curve?: boolean } = {},
-  ) => {
-    const e: RadialEdge = {
-      id: `re-${seq++}`,
-      ax: a.x,
-      ay: a.y,
-      bx: b.x,
-      by: b.y,
-      style,
-      relation,
-      subtype: opts.subtype,
-      ended: opts.ended,
-    }
-    if (opts.curve || style === 'chord') {
-      // Bow the control point out from the segment midpoint so parallel curves
-      // (e.g. two edges into a junction) don't overlap and cross-wedge chords
-      // read as arcs rather than straight cuts.
-      const mx = (a.x + b.x) / 2
-      const my = (a.y + b.y) / 2
-      const dx = b.x - a.x
-      const dy = b.y - a.y
-      const len = Math.hypot(dx, dy) || 1
-      const bow = style === 'chord' ? 0.22 : 0.12
-      e.cx = mx + (-dy / len) * len * bow
-      e.cy = my + (dx / len) * len * bow
-    }
-    edgeList.push(e)
-  }
-
-  const focusPoint = place(focusId, 0, Math.PI / 2, 'focus')
 
   // --- Ancestors above, descendants below, both as nested wedge fans --------
   wedgeAncestors(focusId, 1, ANC_A0, ANC_A1, -1)
   wedgeDescendants(focusId, 1, DESC_A0, DESC_A1, -1)
 
-  // --- The focus's siblings + childless partners: nodes in the clear
-  // horizontal channel between the two fans, tied to the focus by a light stem.
+  // --- The focus's siblings + childless partners: ring-1 slices filling the
+  // clear horizontal channels on the left and right, between the two fans.
   placeFlankers()
 
   return finalize()
@@ -354,42 +267,65 @@ export function computeRadialLayout(
   }
 
   // The focus's siblings (sharing the parents in the fan above) and any
-  // childless partners have no wedge — a sibling isn't a descendant and a
-  // childless partner has no children to nest under. Place them as nodes in the
-  // clear horizontal channel between the two fans, alternating left/right, tied
-  // to the focus by a light stem. Half-siblings are flagged for the renderer.
+  // childless partners have no place in either fan — a sibling isn't a
+  // descendant and a childless partner has no children to nest under. Draw them
+  // as ring-1 slices filling the clear horizontal channels between the two fans,
+  // split across the left and right sides so the chart stays balanced. Half-
+  // siblings are flagged for the renderer.
   function placeFlankers() {
-    const sibs = focusSiblings().map((s) => ({
-      id: s.id,
-      role: 'sibling' as const,
-      half: s.half,
-      ended: undefined as boolean | undefined,
-    }))
-    const loose = sortedPartners(focusId)
-      .filter((p) => !placed.has(p))
-      .map((p) => ({
-        id: p,
-        role: 'spouse' as const,
-        half: false,
-        ended: partnerMeta.get(pairKey(focusId, p))?.ended,
-      }))
-    ;[...sibs, ...loose].forEach((f, i) => {
-      const side = i % 2 === 0 ? -1 : 1
-      const col = Math.floor(i / 2)
-      const sp = placeAt(
-        f.id,
-        { x: side * (CENTER_R + 28 + col * SIBLING_SPREAD), y: 0 },
-        0,
-        side < 0 ? Math.PI : 0,
-        f.role,
-        f.half,
-      )
-      if (f.role === 'spouse') {
-        addEdge(focusPoint, sp, 'chord', 'partner', { ended: f.ended })
-      } else {
-        addEdge(focusPoint, sp, 'unionStem', 'parent_child')
-      }
-    })
+    const flank = [
+      ...focusSiblings().map((s) => ({
+        id: s.id,
+        kind: 'sibling' as const,
+        half: s.half,
+        ended: undefined as boolean | undefined,
+      })),
+      ...sortedPartners(focusId)
+        .filter((p) => !placed.has(p))
+        .map((p) => ({
+          id: p,
+          kind: 'spouse' as const,
+          half: false,
+          ended: partnerMeta.get(pairKey(focusId, p))?.ended,
+        })),
+    ]
+    if (flank.length === 0) return
+
+    // Right channel wraps the 0/2π seam (cos/sin handle it); left channel sits
+    // around π. Alternating the assignment keeps the two sides balanced.
+    const rightCh = { a0: DESC_A1 + CHANNEL_MARGIN, a1: 2 * Math.PI + ANC_A0 - CHANNEL_MARGIN }
+    const leftCh = { a0: ANC_A1 + CHANNEL_MARGIN, a1: DESC_A0 - CHANNEL_MARGIN }
+    const r0 = CENTER_R
+    const r1 = CENTER_R + ANC_BAND
+    const emit = (
+      list: typeof flank,
+      ch: { a0: number; a1: number },
+    ) => {
+      if (list.length === 0) return
+      const span = (ch.a1 - ch.a0) / list.length
+      list.forEach((f, j) => {
+        placed.add(f.id)
+        wedges.push({
+          id: f.id,
+          kind: f.kind,
+          r0,
+          r1,
+          a0: ch.a0 + j * span,
+          a1: ch.a0 + (j + 1) * span,
+          ring: 1,
+          half: f.half || undefined,
+          ended: f.ended,
+        })
+      })
+    }
+    emit(
+      flank.filter((_, i) => i % 2 === 0),
+      rightCh,
+    )
+    emit(
+      flank.filter((_, i) => i % 2 === 1),
+      leftCh,
+    )
   }
 
   // Draw `parentId`'s descendants as nested wedges filling [a0, a1] one ring out.
@@ -537,12 +473,13 @@ export function computeRadialLayout(
       maxX = Math.max(maxX, x)
       maxY = Math.max(maxY, y)
     }
-    for (const n of nodes) consider(n.x, n.y)
+    consider(0, 0) // the focus disc at the origin
     // A wedge's extent is its outer arc, which can bulge past its corners where
-    // it crosses an axis — sample the corners plus any axis angle inside [a0,a1].
+    // it crosses an axis — sample the corners plus any axis angle inside [a0,a1]
+    // (including 2π, since the right-hand channel wraps the seam).
     for (const w of wedges) {
       const angles = [w.a0, w.a1]
-      for (const ax of [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2]) {
+      for (const ax of [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2, 2 * Math.PI]) {
         if (ax >= w.a0 && ax <= w.a1) angles.push(ax)
       }
       for (const a of angles) {
@@ -557,8 +494,7 @@ export function computeRadialLayout(
       maxY = 0
     }
     return {
-      nodes,
-      edges: edgeList,
+      focus: { id: focusId, x: 0, y: 0 },
       wedges,
       minX,
       minY,

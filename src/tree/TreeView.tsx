@@ -313,7 +313,7 @@ function Legend() {
         band (radial)
       </span>
       <span className="flex items-center gap-1.5">
-        <span className="inline-block h-3 w-3 rounded-full border-2 border-dashed border-zinc-400" />{' '}
+        <span className="inline-block h-2.5 w-5 rounded-sm border border-dashed border-zinc-400 bg-zinc-500/30" />{' '}
         half-sibling
       </span>
       <span className="flex items-center gap-1.5">
