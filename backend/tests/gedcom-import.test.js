@@ -146,6 +146,35 @@ describe('previewImport', () => {
     expect(findPerson(preview, 'Lyn Lott').suggestedNodeId).toBe('lyn')
   })
 
+  it('structural boost requires a matching relationship type', async () => {
+    // In the file, Jim is Matt's PARENT. In the tree, the existing "Jim" is
+    // Matt's CHILD (m -> jim). The shared relative (Matt) is the wrong type, so
+    // it must not boost Jim into a suggested merge.
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      node({ nodeId: 'm', firstName: 'Matt', lastName: 'Lott', birthdate: '1979' }),
+      node({ nodeId: 'jim', firstName: 'Jim', lastName: null }),
+    ])
+    vi.mocked(listEdges).mockResolvedValueOnce([
+      { edgeKind: 'parent_child', fromPerson: 'm', toPerson: 'jim', subtype: 'biological' },
+    ])
+    const ged = `0 HEAD
+0 @I1@ INDI
+1 NAME Matt /Lott/
+1 BIRT
+2 DATE 1979
+0 @I5@ INDI
+1 NAME Jim /Lott/
+0 @F1@ FAM
+1 HUSB @I5@
+1 CHIL @I1@
+0 TRLR`
+    const preview = await previewImport('g1', ged)
+    // No matching-type relative -> Jim is at most a "possible" match, not merged.
+    expect(findPerson(preview, 'Jim Lott').suggestedNodeId).toBeNull()
+    // Matt still matches (name + date), just without lifting Jim.
+    expect(findPerson(preview, 'Matt Lott').suggestedNodeId).toBe('m')
+  })
+
   it('re-import: committed people are hidden, a previously-skipped one is reviewable', async () => {
     // Scenario: last time you imported this file, accepted Ada + William (now in
     // the tree, partnered) and skipped Zed (never created). Re-importing the

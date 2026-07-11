@@ -39,31 +39,41 @@ function pickFields(obj) {
 
 // --- graph adjacency (for structural matching) --------------------------
 
-// Existing tree: nodeId -> Set(neighbouring nodeId). Relation-agnostic — for
-// "do these two share a relative" a shared neighbour of any kind is the signal.
+// The role a person plays toward a neighbour, so the structural signal can
+// require a *typed* match: a partner is symmetric, while a parent_child edge
+// makes the parent see the other as 'child' and the child see them as 'parent'.
+function roleToward(fromIsA, kind) {
+  if (kind === 'partner') return 'partner'
+  // parent_child: the edge's `from` is the parent. `fromIsA` means we're asking
+  // from the `from` endpoint's perspective.
+  return fromIsA ? 'child' : 'parent'
+}
+
+// Existing tree adjacency: nodeId -> Map(neighbourId -> role). One relationship
+// per pair means at most one role per neighbour.
 function existingAdjacency(edges) {
   const adj = new Map()
-  const link = (a, b) => {
-    if (!adj.has(a)) adj.set(a, new Set())
-    adj.get(a).add(b)
+  const link = (a, b, role) => {
+    if (!adj.has(a)) adj.set(a, new Map())
+    adj.get(a).set(b, role)
   }
   for (const e of edges) {
-    link(e.fromPerson, e.toPerson)
-    link(e.toPerson, e.fromPerson)
+    link(e.fromPerson, e.toPerson, roleToward(true, e.edgeKind))
+    link(e.toPerson, e.fromPerson, roleToward(false, e.edgeKind))
   }
   return adj
 }
 
-// Imported file: xref -> Set(neighbouring xref), from the mapped edge list.
+// Imported file adjacency: xref -> Map(neighbourXref -> role).
 function importedAdjacency(edges) {
   const adj = new Map()
-  const link = (a, b) => {
-    if (!adj.has(a)) adj.set(a, new Set())
-    adj.get(a).add(b)
+  const link = (a, b, role) => {
+    if (!adj.has(a)) adj.set(a, new Map())
+    adj.get(a).set(b, role)
   }
   for (const e of edges) {
-    link(e.from, e.to)
-    link(e.to, e.from)
+    link(e.from, e.to, roleToward(true, e.kind))
+    link(e.to, e.from, roleToward(false, e.kind))
   }
   return adj
 }
@@ -172,12 +182,16 @@ export async function previewImport(groupId, gedcomText) {
   // Pass 2 — structural boost: a candidate that is a neighbour of this person's
   // other provisional matches is far more likely to be the real one.
   for (const { p, cands } of scored) {
-    const neighbours = impAdj.get(p.xref) || new Set()
+    const neighbours = impAdj.get(p.xref) || new Map()
     for (const c of cands) {
       let shared = 0
-      for (const ny of neighbours) {
+      for (const [ny, role] of neighbours) {
         const mapped = provisional.get(ny)
-        if (mapped && exAdj.get(c.node.nodeId)?.has(mapped)) shared += 1
+        // Count a shared relative only when the relationship type matches — an
+        // imported parent must line up with an existing parent, a partner with a
+        // partner, etc. — so an unrelated same-node connection doesn't inflate
+        // the score.
+        if (mapped && exAdj.get(c.node.nodeId)?.get(mapped) === role) shared += 1
       }
       if (shared) {
         c.score += Math.min(shared * WEIGHTS.sharedRelative, WEIGHTS.sharedRelativeCap)
