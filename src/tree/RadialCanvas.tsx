@@ -57,16 +57,24 @@ type LabelLayout =
   | { curved: false; x: number; y: number; rot: number; fontSize: number; text: string }
   | { curved: true; path: string; fontSize: number; text: string }
 
+// Fraction of a wedge's thickness the text may occupy — the rest is margin so a
+// label never touches the band's edges (or a neighboring slice's divider).
+const LABEL_FILL = 0.62
+
 function labelLayout(w: Wedge, name: string): LabelLayout {
   const mid = (w.a0 + w.a1) / 2
-  const rMid = (w.r0 + w.r1) / 2
-  const arc = (w.a1 - w.a0) * rMid
   const band = w.r1 - w.r0
-  const radial = arc < band
+  const arcMid = (w.a1 - w.a0) * ((w.r0 + w.r1) / 2)
+  const radial = arcMid < band
 
-  const length = radial ? band : arc // space along the text baseline
-  const thickness = radial ? arc : band // space across it
-  let fontSize = Math.min(LABEL_BASE, thickness * 0.82)
+  // Radial (sliver / channel-slice) labels sit a little outward, where the arc
+  // is wider, giving the text more room across its baseline before it touches
+  // the slice's radial edges.
+  const rc = radial ? w.r0 + band * 0.6 : (w.r0 + w.r1) / 2
+  const length = radial ? band : (w.a1 - w.a0) * rc // along the baseline
+  const thickness = radial ? (w.a1 - w.a0) * rc : band // across it
+
+  let fontSize = Math.min(LABEL_BASE, thickness * LABEL_FILL)
   const avail = Math.max(0, length - LABEL_PAD)
   if (name.length * fontSize * CHAR_W > avail) {
     fontSize = Math.max(LABEL_MIN, avail / (name.length * CHAR_W))
@@ -77,12 +85,13 @@ function labelLayout(w: Wedge, name: string): LabelLayout {
   if (radial) {
     let rot = -(mid * 180) / Math.PI
     if (Math.cos(mid) < 0) rot += 180 // keep upright on the left half
-    return { curved: false, x: rMid * Math.cos(mid), y: -rMid * Math.sin(mid), rot, fontSize, text }
+    return { curved: false, x: rc * Math.cos(mid), y: -rc * Math.sin(mid), rot, fontSize, text }
   }
 
   // Curved: an arc at mid-radius spanning the wedge. On the upper half draw it
   // right-to-left (sweep 1) so the text runs left-to-right upright; on the lower
   // half draw left-to-right (sweep 0) so it isn't upside down.
+  const rMid = (w.r0 + w.r1) / 2
   const pt = (a: number) =>
     `${(rMid * Math.cos(a)).toFixed(2)} ${(-rMid * Math.sin(a)).toFixed(2)}`
   const upper = Math.sin(mid) > 0
