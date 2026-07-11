@@ -240,12 +240,19 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
               Views
             </h3>
             <p>
-              <span className="text-zinc-100">Whole tree</span> — everyone, laid
-              out by generation.
+              <span className="text-zinc-100">Tree</span> — everyone, laid out
+              by generation.
             </p>
             <p>
               <span className="text-zinc-100">Focus</span> — zoom in on one
               person and their close family; tap anyone to re-center on them.
+            </p>
+            <p>
+              <span className="text-zinc-100">Radial</span> — one person at the
+              center, with a color-coded fan of ancestors above and descendants
+              below (one hue per family branch); spouses show as thin bands and
+              siblings flank the center. Tap anyone to re-root the chart on them.
+              Best for large or complex families on a phone.
             </p>
           </section>
 
@@ -294,8 +301,27 @@ function Legend() {
         <span className="inline-block h-0.5 w-5 bg-rose-400" /> partner
       </span>
       <span className="flex items-center gap-1.5">
+        <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-amber-400" />{' '}
+        adopted / step (radial)
+      </span>
+      <span className="flex items-center gap-1.5">
         <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-zinc-400" />{' '}
         ended
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-2.5 w-5 rounded-sm bg-rose-500/40" /> spouse
+        band (radial)
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-2.5 w-5 rounded-sm border border-dashed border-zinc-400 bg-zinc-500/30" />{' '}
+        half-sibling
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-flex h-3 w-3 overflow-hidden rounded-full">
+          <span className="h-full w-1/2 bg-sky-500/50" />
+          <span className="h-full w-1/2 bg-rose-500/50" />
+        </span>{' '}
+        fan color = family branch
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-3 w-3 rounded-full border-2 border-emerald-400" />{' '}
