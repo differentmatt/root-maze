@@ -112,6 +112,39 @@ describe('previewImport', () => {
     expect(preview.stats.alreadyInTree).toBe(2)
   })
 
+  it('re-import: committed people are hidden, a previously-skipped one is reviewable', async () => {
+    // Scenario: last time you imported this file, accepted Ada + William (now in
+    // the tree, partnered) and skipped Zed (never created). Re-importing the
+    // same file: Ada + William are alreadyInTree; Zed comes back as reviewable.
+    const ged = `0 HEAD
+0 @I1@ INDI
+1 NAME Ada /King/
+0 @I2@ INDI
+1 NAME William /King/
+0 @I3@ INDI
+1 NAME Zed /King/
+0 @F1@ FAM
+1 HUSB @I2@
+1 WIFE @I1@
+0 TRLR`
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      node({ nodeId: 'nod_ada', firstName: 'Ada', lastName: 'King' }),
+      node({ nodeId: 'nod_will', firstName: 'William', lastName: 'King' }),
+    ])
+    vi.mocked(listEdges).mockResolvedValueOnce([
+      { edgeKind: 'partner', fromPerson: 'nod_ada', toPerson: 'nod_will', subtype: 'partner' },
+    ])
+
+    const preview = await previewImport('g1', ged)
+    expect(findPerson(preview, 'Ada King').alreadyInTree).toBe(true)
+    expect(findPerson(preview, 'William King').alreadyInTree).toBe(true)
+
+    const zed = findPerson(preview, 'Zed King')
+    expect(zed.alreadyInTree).toBe(false)
+    expect(zed.suggestedNodeId).toBeNull() // not in the tree — a fresh import again
+    expect(preview.stats.alreadyInTree).toBe(2)
+  })
+
   it('does NOT mark alreadyInTree when the file adds a new relationship', async () => {
     // Ada and William both already exist but are NOT yet connected; the file's
     // partner edge is new, so Ada has something to add.
