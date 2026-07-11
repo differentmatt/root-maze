@@ -337,35 +337,33 @@ function DateField({
   onChange: (v: string) => void
   placeholder: string
 }) {
-  const picker = useRef<HTMLInputElement>(null)
   return (
     <div className="relative">
       <input
         type="text"
-        className={`${inputClass} pr-9`}
+        className={`${inputClass} pr-10`}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
       />
-      {/* Hidden native date input, opened by the calendar button. Seeded with
-          the current value only when it's a full ISO date the picker can show. */}
-      <input
-        ref={picker}
-        type="date"
-        tabIndex={-1}
-        aria-hidden="true"
-        className="pointer-events-none absolute bottom-0 right-2 h-0 w-0 opacity-0"
-        value={ISO_DATE.test(value) ? value : ''}
-        onChange={(e) => e.target.value && onChange(e.target.value)}
-      />
-      <button
-        type="button"
-        aria-label="Pick a date"
-        onClick={() => picker.current?.showPicker?.()}
-        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1 text-zinc-400 hover:text-zinc-200"
-      >
-        📅
-      </button>
+      {/* A transparent native date input overlaid on the calendar icon. Tapping
+          the icon actually taps this input, so the native picker opens directly
+          (reliable on mobile, no showPicker needed); picking a date writes its
+          ISO value into the free-form text field. Seeded from the current value
+          only when it's a full ISO date the picker can represent. */}
+      <span className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center">
+        <span aria-hidden className="pointer-events-none text-zinc-400">
+          📅
+        </span>
+        <input
+          type="date"
+          aria-label="Pick a date"
+          className="absolute inset-0 cursor-pointer opacity-0"
+          value={ISO_DATE.test(value) ? value : ''}
+          onChange={(e) => e.target.value && onChange(e.target.value)}
+          onClick={(e) => e.currentTarget.showPicker?.()}
+        />
+      </span>
     </div>
   )
 }
