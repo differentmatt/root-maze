@@ -37,19 +37,55 @@ function wedgePath(w: Wedge): string {
   )
 }
 
-// Where and how to draw a wedge's label: centered in the wedge and rotated
-// tangent to its ring, which keeps every label upright across the upper fan
-// (horizontal at the top, vertical at the sides).
-function wedgeLabel(w: Wedge) {
+const LABEL_BASE = 11 // preferred font size
+const LABEL_MIN = 6.5 // smallest we shrink to before truncating
+const CHAR_W = 0.56 // approx glyph width as a fraction of font size
+const LABEL_PAD = 5
+
+// Place and size a wedge's label so it always reads upright and fits.
+//   - A fat wedge gets *tangential* text (following the ring), flipped to stay
+//     upright on the lower half instead of hanging upside down.
+//   - A thin sliver (arc narrower than the wedge is deep) gets *radial* text
+//     reading outward, flipped on the left half so it's never upside down —
+//     which fits a name a cramped arc never could.
+// The font shrinks to fit the available length (down to LABEL_MIN) before the
+// name is truncated with an ellipsis, and is capped by the wedge's thickness so
+// text never spills across the band.
+function labelLayout(w: Wedge, name: string) {
   const mid = (w.a0 + w.a1) / 2
   const rMid = (w.r0 + w.r1) / 2
-  return {
-    x: rMid * Math.cos(mid),
-    y: -rMid * Math.sin(mid),
-    rot: 90 - (mid * 180) / Math.PI,
-    // Arc length available for the label, so a cramped inner wedge can shrink.
-    arc: (w.a1 - w.a0) * rMid,
+  const x = rMid * Math.cos(mid)
+  const y = -rMid * Math.sin(mid)
+  const midDeg = (mid * 180) / Math.PI
+  const arc = (w.a1 - w.a0) * rMid
+  const band = w.r1 - w.r0
+  const radial = arc < band
+
+  let rot: number
+  let length: number // space along the text baseline
+  let thickness: number // space across it
+  if (radial) {
+    rot = -midDeg
+    if (Math.cos(mid) < 0) rot += 180 // keep upright on the left half
+    length = band
+    thickness = arc
+  } else {
+    rot = 90 - midDeg
+    // Normalize into [-90, 90] so lower-half labels aren't upside down.
+    while (rot < -90) rot += 180
+    while (rot > 90) rot -= 180
+    length = arc
+    thickness = band
   }
+
+  let fontSize = Math.min(LABEL_BASE, thickness * 0.82)
+  const avail = Math.max(0, length - LABEL_PAD)
+  if (name.length * fontSize * CHAR_W > avail) {
+    fontSize = Math.max(LABEL_MIN, avail / (name.length * CHAR_W))
+  }
+  const fitChars = Math.max(1, Math.floor(avail / (fontSize * CHAR_W)))
+  const text = name.length > fitChars ? `${name.slice(0, fitChars - 1)}…` : name
+  return { x, y, rot, fontSize, text }
 }
 
 // The ego-centric radial chart: the focus person as a disc at the center, with
@@ -194,13 +230,10 @@ export default function RadialCanvas({
                       LINEAGE_COLORS.length) %
                       LINEAGE_COLORS.length
                   ]
-            // A thin band (spouse-at-base) gets a small label; a full slice more.
+            // A thin band (spouse-at-base) is drawn fainter than a full slice.
             const thin = spouse && w.r1 - w.r0 < 20
-            const lbl = wedgeLabel(w)
             const short = shortName(n)
-            const maxChars = Math.max(2, Math.floor(lbl.arc / (thin ? 5 : 6.5)))
-            const text =
-              short.length > maxChars ? `${short.slice(0, maxChars - 1)}…` : short
+            const lbl = labelLayout(w, short)
             const ariaName = n.name || short
             return (
               <g
@@ -239,10 +272,10 @@ export default function RadialCanvas({
                   transform={`rotate(${lbl.rot} ${lbl.x} ${lbl.y})`}
                   textAnchor="middle"
                   dominantBaseline="middle"
-                  fontSize={thin ? 8 : 11}
+                  fontSize={lbl.fontSize}
                   fill={spouse ? '#fecdd3' : '#f4f4f5'}
                 >
-                  {text}
+                  {lbl.text}
                 </text>
               </g>
             )
