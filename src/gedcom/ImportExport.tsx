@@ -527,11 +527,11 @@ function FilePicker({
       {label}
       <input
         type="file"
-        // Be generous: a .GED file is reported with all sorts of MIME types
-        // (Windows often calls it application/octet-stream) and case-sensitive
-        // pickers grey out .GED against a lowercase ".ged" hint. We validate the
-        // content server-side, so the picker only needs to let the file through.
-        accept=".ged,.gedcom,.GED,.GEDCOM,application/x-gedcom,text/vnd.familysearch.gedcom,text/plain,application/octet-stream"
+        // No `accept` filter on purpose. `.ged` has no registered type, so
+        // iOS/Safari (and some Android/Windows pickers) grey the file out when
+        // accept is set — which is exactly the "I can't pick my file" bug. We
+        // validate the content server-side, so letting any file through is both
+        // safe and the only reliable way to select a .ged on every platform.
         disabled={disabled}
         className="hidden"
         onChange={(e) => {
