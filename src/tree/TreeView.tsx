@@ -320,11 +320,11 @@ const cardClass =
 const primaryBtn =
   'rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40'
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
-
-// Native date picker for the common case, with a graceful fallback to a text
-// field for legacy or approximate values (e.g. a year only) so we never drop
-// data the picker can't represent.
+// Birth/death dates are stored free-form, so they can hold anything GEDCOM does
+// — a full date, a year, or an approximate value like "ABT 1850". A plain text
+// field (not a native date picker, which only represents full ISO dates) is
+// what lets those through, lets a year be typed, and lets the value be cleared
+// reliably on every device.
 function DateField({
   value,
   onChange,
@@ -334,10 +334,9 @@ function DateField({
   onChange: (v: string) => void
   placeholder: string
 }) {
-  const type = value === '' || ISO_DATE.test(value) ? 'date' : 'text'
   return (
     <input
-      type={type}
+      type="text"
       className={inputClass}
       value={value}
       onChange={(e) => onChange(e.target.value)}
@@ -505,7 +504,7 @@ function AddPersonForm({
         <DateField
           value={birthdate}
           onChange={setBirthdate}
-          placeholder="Birthdate"
+          placeholder="e.g. 1979 or 1979-05-01"
         />
       </Field>
       {error && <p className="text-sm text-red-400">{error}</p>}
@@ -790,10 +789,10 @@ function PersonPanel({
         </button>
       )}
       <Field label="Birthdate">
-        <DateField value={birthdate} onChange={setBirthdate} placeholder="Birthdate" />
+        <DateField value={birthdate} onChange={setBirthdate} placeholder="e.g. 1979 or 1979-05-01" />
       </Field>
       <Field label="Death date">
-        <DateField value={deathdate} onChange={setDeathdate} placeholder="Death date" />
+        <DateField value={deathdate} onChange={setDeathdate} placeholder="e.g. 1966 or 1966-03-20" />
       </Field>
       <Field label="Notes">
         <textarea
