@@ -37,6 +37,21 @@ const GED = `0 HEAD
 0 TRLR
 `
 
+// Convenience: an existing node with sensible defaults.
+const node = (over) => ({
+  nodeId: 'nod_x',
+  firstName: 'X',
+  middleName: null,
+  lastName: null,
+  birthdate: null,
+  deathdate: null,
+  notes: null,
+  updatedAt: '2024-01-01',
+  ...over,
+})
+
+const findPerson = (preview, name) => preview.people.find((p) => p.fullName === name)
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(listNodes).mockResolvedValue([])
@@ -46,8 +61,8 @@ beforeEach(() => {
     ...input,
   }))
   vi.mocked(updateNode).mockResolvedValue({})
-  vi.mocked(putEdgeIfNew).mockImplementation(async (_g, _a, _input, pairsSeen) => {
-    const key = [_input.fromPerson, _input.toPerson].sort().join('|')
+  vi.mocked(putEdgeIfNew).mockImplementation(async (_g, _a, input, pairsSeen) => {
+    const key = [input.fromPerson, input.toPerson].sort().join('|')
     if (pairsSeen.has(key)) return null
     pairsSeen.add(key)
     return {}
@@ -55,120 +70,109 @@ beforeEach(() => {
 })
 
 describe('previewImport', () => {
-  it('reports stats, the tree name, and all-new people for an empty group', async () => {
+  it('reports stats and all-new people for an empty group', async () => {
     const preview = await previewImport('g1', GED)
     expect(preview.treeName).toBe('The Family')
     expect(preview.stats).toEqual({
       people: 2,
       relationships: 1,
-      matches: 0,
+      strongMatches: 0,
+      possibleMatches: 0,
       newPeople: 2,
     })
-    expect(preview.people.every((p) => p.match === null)).toBe(true)
+    expect(preview.people.every((p) => p.candidates.length === 0)).toBe(true)
+    expect(preview.people.every((p) => p.suggestedNodeId === null)).toBe(true)
   })
 
-  it('suggests a match and splits differences into fills vs conflicts', async () => {
+  it('surfaces relationships each imported person brings', async () => {
+    const preview = await previewImport('g1', GED)
+    const ada = findPerson(preview, 'Ada King')
+    expect(ada.relationships).toContainEqual({ relation: 'partner', otherName: 'William King' })
+  })
+
+  it('suggests a strong match and diffs fields (same vs tree-only)', async () => {
     vi.mocked(listNodes).mockResolvedValueOnce([
-      {
-        nodeId: 'nod_existing',
-        firstName: 'Ada',
-        middleName: null,
-        lastName: 'King',
-        birthdate: '1815',
-        deathdate: null,
-        notes: 'Old note',
-      },
+      node({ nodeId: 'nod_ada', firstName: 'Ada', lastName: 'King', birthdate: '1815', notes: 'Old note' }),
     ])
 
     const preview = await previewImport('g1', GED)
-    const ada = preview.people.find((p) => p.fullName === 'Ada King')
-    expect(ada.match.nodeId).toBe('nod_existing')
-    // Imported birthdate equals existing -> no conflict there.
-    expect(ada.match.conflicts).toHaveLength(0)
-    expect(preview.stats.matches).toBe(1)
-  })
-
-  it('flags a same-name person with a different birthdate as a conflict', async () => {
-    vi.mocked(listNodes).mockResolvedValueOnce([
-      {
-        nodeId: 'nod_a',
-        firstName: 'William',
-        middleName: null,
-        lastName: 'King',
-        birthdate: null,
-        deathdate: null,
-        notes: null,
-      },
-    ])
-    const preview = await previewImport('g1', GED)
-    const will = preview.people.find((p) => p.fullName === 'William King')
-    expect(will.match.nodeId).toBe('nod_a')
-    // existing has no birthdate; import has none either for William -> no diff.
-    expect(will.match.conflicts).toHaveLength(0)
-  })
-
-  it('does not suggest a same-name match when birthdates disagree', async () => {
-    vi.mocked(listNodes).mockResolvedValueOnce([
-      {
-        nodeId: 'nod_other',
-        firstName: 'Ada',
-        middleName: null,
-        lastName: 'King',
-        birthdate: '1900',
-        deathdate: null,
-        notes: null,
-      },
-    ])
-    const preview = await previewImport('g1', GED)
-    const ada = preview.people.find((p) => p.fullName === 'Ada King')
-    expect(ada.match).toBeNull()
+    const ada = findPerson(preview, 'Ada King')
+    expect(ada.suggestedNodeId).toBe('nod_ada')
+    expect(ada.candidates[0].tier).toBe('strong')
+    const byField = Object.fromEntries(ada.candidates[0].fieldDiffs.map((d) => [d.field, d.status]))
+    expect(byField.birthdate).toBe('same')
+    expect(byField.notes).toBe('treeOnly') // tree has a note, import doesn't
   })
 
   it('matches across a middle-name gap and a year-vs-full-date difference', async () => {
-    // The real report: existing "Matt McCabe Lott" (born 1979-05-01) should be
-    // recognised when importing "Matt Lott" (born 1979) — the middle name and
-    // date precision differ but it's the same person.
+    // The real report: existing "Matt McCabe Lott" (born 1979-05-01) recognised
+    // when importing "Matt Lott" (born 1979).
     vi.mocked(listNodes).mockResolvedValueOnce([
-      {
-        nodeId: 'nod_matt',
-        firstName: 'Matt',
-        middleName: 'McCabe',
-        lastName: 'Lott',
-        birthdate: '1979-05-01',
-        deathdate: null,
-        notes: null,
-        updatedAt: 't',
-      },
+      node({ nodeId: 'nod_matt', firstName: 'Matt', middleName: 'McCabe', lastName: 'Lott', birthdate: '1979-05-01' }),
     ])
     const ged = '0 HEAD\n0 @I1@ INDI\n1 NAME Matt /Lott/\n1 BIRT\n2 DATE 1979\n0 TRLR'
     const preview = await previewImport('g1', ged)
-    const matt = preview.people.find((p) => p.fullName === 'Matt Lott')
-    expect(matt.match).not.toBeNull()
-    expect(matt.match.nodeId).toBe('nod_matt')
-    // The differing birthdate precision is surfaced as a conflict to resolve,
-    // not silently overwritten; the existing middle name is left intact.
-    expect(matt.match.conflicts.some((c) => c.field === 'birthdate')).toBe(true)
+    const matt = findPerson(preview, 'Matt Lott')
+    expect(matt.suggestedNodeId).toBe('nod_matt')
+    const byField = Object.fromEntries(matt.candidates[0].fieldDiffs.map((d) => [d.field, d.status]))
+    expect(byField.birthdate).toBe('conflict') // 1979 vs 1979-05-01, for review
+    expect(byField.middleName).toBe('treeOnly') // keep existing "McCabe"
   })
 
-  it('does not suggest the same existing node to two different imported people', async () => {
-    // Two imported people with the same name; only one existing node.
-    const gedTwins = `0 HEAD\n0 @I1@ INDI\n1 NAME Ada /King/\n0 @I2@ INDI\n1 NAME Ada /King/\n0 TRLR`
+  it('matches a nickname (Matthew Lott -> existing Matt Lott)', async () => {
     vi.mocked(listNodes).mockResolvedValueOnce([
-      {
-        nodeId: 'nod_ada',
-        firstName: 'Ada',
-        middleName: null,
-        lastName: 'King',
-        birthdate: null,
-        deathdate: null,
-        notes: null,
-        updatedAt: '2024-01-01',
-      },
+      node({ nodeId: 'nod_matt', firstName: 'Matt', lastName: 'Lott', birthdate: '1979' }),
+    ])
+    const ged = '0 HEAD\n0 @I1@ INDI\n1 NAME Matthew /Lott/\n1 BIRT\n2 DATE 1979\n0 TRLR'
+    const preview = await previewImport('g1', ged)
+    const matt = findPerson(preview, 'Matthew Lott')
+    expect(matt.suggestedNodeId).toBe('nod_matt')
+    expect(matt.candidates[0].reasons.join(' ')).toMatch(/nickname/)
+  })
+
+  it('does not surface a same-name node whose birth year disagrees', async () => {
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      node({ nodeId: 'nod_other', firstName: 'Ada', lastName: 'King', birthdate: '1900' }),
+    ])
+    const preview = await previewImport('g1', GED)
+    const ada = findPerson(preview, 'Ada King')
+    expect(ada.candidates).toHaveLength(0)
+    expect(ada.suggestedNodeId).toBeNull()
+  })
+
+  it('does not surface same-surname relatives with unrelated first names', async () => {
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      node({ nodeId: 'nod_zed', firstName: 'Zebediah', lastName: 'King' }),
+    ])
+    const preview = await previewImport('g1', GED)
+    // Neither Ada nor William should match Zebediah on surname alone.
+    expect(preview.people.every((p) => p.candidates.length === 0)).toBe(true)
+  })
+
+  it('boosts a candidate that shares a relative already in the tree', async () => {
+    // Tree: Ada King <-> William King (partners). Import the same couple; each
+    // person's match should be reinforced by the other's provisional match.
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      node({ nodeId: 'nod_ada', firstName: 'Ada', lastName: 'King' }),
+      node({ nodeId: 'nod_will', firstName: 'William', lastName: 'King' }),
+    ])
+    vi.mocked(listEdges).mockResolvedValueOnce([
+      { edgeKind: 'partner', fromPerson: 'nod_ada', toPerson: 'nod_will', subtype: 'partner' },
+    ])
+    const preview = await previewImport('g1', GED)
+    const ada = findPerson(preview, 'Ada King')
+    expect(ada.suggestedNodeId).toBe('nod_ada')
+    expect(ada.candidates[0].reasons.join(' ')).toMatch(/shares 1 relative/)
+  })
+
+  it('defaults only one imported person to a shared candidate node', async () => {
+    const gedTwins = '0 HEAD\n0 @I1@ INDI\n1 NAME Ada /King/\n0 @I2@ INDI\n1 NAME Ada /King/\n0 TRLR'
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      node({ nodeId: 'nod_ada', firstName: 'Ada', lastName: 'King' }),
     ])
     const preview = await previewImport('g1', gedTwins)
-    const matches = preview.people.filter((p) => p.match !== null)
-    // At most one of the two should be matched to the single existing node.
-    expect(matches.length).toBe(1)
+    const suggested = preview.people.filter((p) => p.suggestedNodeId === 'nod_ada')
+    expect(suggested).toHaveLength(1)
   })
 })
 
@@ -179,92 +183,62 @@ describe('commitImport', () => {
     expect(summary.merged).toBe(0)
     expect(summary.relationshipsCreated).toBe(1)
     expect(putEdgeIfNew).toHaveBeenCalledTimes(1)
-    expect(putEdgeIfNew).toHaveBeenCalledWith('g1', 'acc_1', expect.objectContaining({
-      edgeKind: 'partner',
-      subtype: 'partner',
-    }), expect.any(Set))
+    expect(putEdgeIfNew).toHaveBeenCalledWith(
+      'g1',
+      'acc_1',
+      expect.objectContaining({ edgeKind: 'partner', subtype: 'partner' }),
+      expect.any(Set),
+    )
   })
 
   it('skips a person and drops relationships that touch them', async () => {
-    const summary = await commitImport('g1', 'acc_1', GED, {
-      '@I1@': { action: 'skip' },
-    })
+    const summary = await commitImport('g1', 'acc_1', GED, { '@I1@': { action: 'skip' } })
     expect(summary.skipped).toBe(1)
     expect(summary.created).toBe(1)
-    // The partner edge needs @I1@, which was skipped -> not created.
     expect(summary.relationshipsCreated).toBe(0)
     expect(summary.relationshipsSkipped).toBe(1)
     expect(putEdgeIfNew).not.toHaveBeenCalled()
   })
 
-  it('merges into an existing node, filling empties and overwriting on request', async () => {
-    vi.mocked(getNode).mockResolvedValue({
-      nodeId: 'nod_existing',
-      firstName: 'Ada',
-      middleName: null,
-      lastName: 'King',
-      birthdate: null, // empty -> import fills it
-      deathdate: null,
-      notes: 'Keep me',
-      updatedAt: '2024-01-01T00:00:00.000Z',
-    })
+  it('merges into an existing node, writing only the requested fields', async () => {
+    vi.mocked(getNode).mockResolvedValue(
+      node({ nodeId: 'nod_existing', firstName: 'Ada', lastName: 'King', birthdate: null, notes: 'Keep me', updatedAt: 't' }),
+    )
 
     const summary = await commitImport('g1', 'acc_1', GED, {
-      '@I1@': {
-        action: 'merge',
-        nodeId: 'nod_existing',
-        overwrite: ['notes'],
-        updatedAt: '2024-01-01T00:00:00.000Z',
-      },
+      '@I1@': { action: 'merge', nodeId: 'nod_existing', fields: ['birthdate'], updatedAt: 't' },
     })
 
     expect(summary.merged).toBe(1)
     expect(summary.created).toBe(1) // William still created
     const patch = vi.mocked(updateNode).mock.calls[0][3]
-    expect(patch.birthdate).toBe('1815') // filled (was empty)
+    expect(patch).toEqual({ birthdate: '1815' })
+  })
+
+  it('a relationships-only merge writes no fields but still connects the person', async () => {
+    vi.mocked(getNode).mockResolvedValue(node({ nodeId: 'nod_existing', firstName: 'Ada', lastName: 'King', updatedAt: 't' }))
+    const summary = await commitImport('g1', 'acc_1', GED, {
+      '@I1@': { action: 'merge', nodeId: 'nod_existing', fields: [], updatedAt: 't' },
+    })
+    expect(summary.merged).toBe(1)
+    expect(updateNode).not.toHaveBeenCalled()
+    // The partner edge (Ada<->William) is still created against nod_existing.
+    expect(summary.relationshipsCreated).toBe(1)
   })
 
   it('rejects a stale merge when updatedAt has changed since preview', async () => {
-    vi.mocked(getNode).mockResolvedValue({
-      nodeId: 'nod_existing',
-      firstName: 'Ada',
-      middleName: null,
-      lastName: 'King',
-      birthdate: null,
-      deathdate: null,
-      notes: null,
-      updatedAt: '2024-06-01T00:00:00.000Z', // newer than the preview snapshot
-    })
-
+    vi.mocked(getNode).mockResolvedValue(node({ nodeId: 'nod_existing', firstName: 'Ada', lastName: 'King', updatedAt: '2024-06-01' }))
     await expect(
       commitImport('g1', 'acc_1', GED, {
-        '@I1@': {
-          action: 'merge',
-          nodeId: 'nod_existing',
-          overwrite: [],
-          updatedAt: '2024-01-01T00:00:00.000Z', // stale
-        },
+        '@I1@': { action: 'merge', nodeId: 'nod_existing', fields: [], updatedAt: '2024-01-01' },
       }),
     ).rejects.toThrow(ValidationError)
   })
 
   it('counts a duplicate relationship as skipped rather than failing', async () => {
-    // Simulate an existing edge for the pair that will be imported.
     vi.mocked(listEdges).mockResolvedValueOnce([
-      {
-        edgeId: 'edge_1',
-        fromPerson: 'nod_Ada',
-        toPerson: 'nod_William',
-        edgeKind: 'partner',
-        subtype: 'partner',
-        startDate: null,
-        endDate: null,
-        createdAt: '2024-01-01',
-        updatedAt: '2024-01-01',
-        updatedBy: 'acc_1',
-      },
+      { fromPerson: 'nod_Ada', toPerson: 'nod_William', edgeKind: 'partner', subtype: 'partner' },
     ])
-    // putEdgeIfNew returns null when pair already exists.
     vi.mocked(putEdgeIfNew).mockResolvedValueOnce(null)
     const summary = await commitImport('g1', 'acc_1', GED, {})
     expect(summary.relationshipsSkipped).toBe(1)
@@ -274,7 +248,7 @@ describe('commitImport', () => {
   it('falls back to create when a merge target has vanished', async () => {
     vi.mocked(getNode).mockResolvedValueOnce(null)
     const summary = await commitImport('g1', 'acc_1', GED, {
-      '@I1@': { action: 'merge', nodeId: 'gone', overwrite: [], updatedAt: '2024-01-01' },
+      '@I1@': { action: 'merge', nodeId: 'gone', fields: [], updatedAt: 't' },
     })
     expect(summary.merged).toBe(0)
     expect(summary.created).toBe(2)

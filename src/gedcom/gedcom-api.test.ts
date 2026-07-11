@@ -34,7 +34,7 @@ describe('gedcom api', () => {
       '@I1@': {
         action: 'merge',
         nodeId: 'nod_1',
-        overwrite: ['birthdate'],
+        fields: ['birthdate'],
         updatedAt: '2024-01-01T00:00:00.000Z',
       },
     })
@@ -45,7 +45,7 @@ describe('gedcom api', () => {
     expect(body.resolutions['@I1@']).toEqual({
       action: 'merge',
       nodeId: 'nod_1',
-      overwrite: ['birthdate'],
+      fields: ['birthdate'],
       updatedAt: '2024-01-01T00:00:00.000Z',
     })
   })

@@ -338,47 +338,68 @@ export interface ImportedFields {
   notes: string | null
 }
 
-// A field the tree is missing that the import can supply (applied on merge).
-export interface ImportFill {
+// Per-field comparison of an imported person against a candidate node:
+//   fill     — tree is empty, import can supply it (applied by default)
+//   conflict — both differ; the user chooses whether to overwrite
+//   same     — identical (shown for context)
+//   treeOnly — tree has a value the import lacks (never overwritten)
+export type FieldDiffStatus = 'same' | 'fill' | 'conflict' | 'treeOnly'
+
+export interface FieldDiff {
   field: keyof ImportedFields
-  imported: string
+  status: FieldDiffStatus
+  existing: string | null
+  imported: string | null
 }
 
-// A field where the tree and the file disagree — the caller picks a winner.
-export interface ImportConflict {
-  field: keyof ImportedFields
-  existing: string
-  imported: string
-}
-
-export interface ImportMatch {
+// A ranked existing-person candidate for an imported record.
+export interface MatchCandidate {
   nodeId: string
   name: string
-  // The node's updatedAt at preview time. The client echoes this back in the
-  // merge resolution so the server can reject a stale-merge.
+  fields: ImportedFields
+  score: number
+  tier: 'strong' | 'possible'
+  reasons: string[]
+  // The node's updatedAt at preview time, echoed back on merge so the server
+  // can reject a stale merge.
   updatedAt: string
-  fills: ImportFill[]
-  conflicts: ImportConflict[]
+  fieldDiffs: FieldDiff[]
+}
+
+// A relationship the imported person brings, named by the other endpoint.
+export interface ImportRelationship {
+  relation: 'partner' | 'parent' | 'child'
+  otherName: string
 }
 
 export interface ImportPerson {
   xref: string
   fullName: string
   fields: ImportedFields
-  match: ImportMatch | null
+  candidates: MatchCandidate[]
+  // The default merge target for a strong, unambiguous match, or null.
+  suggestedNodeId: string | null
+  relationships: ImportRelationship[]
 }
 
 export interface ImportPreview {
   treeName: string | null
-  stats: { people: number; relationships: number; matches: number; newPeople: number }
+  stats: {
+    people: number
+    relationships: number
+    strongMatches: number
+    possibleMatches: number
+    newPeople: number
+  }
   people: ImportPerson[]
 }
 
-// How to handle one imported person on commit, keyed by GEDCOM xref.
+// How to handle one imported person on commit, keyed by GEDCOM xref. On merge,
+// `fields` lists which imported fields to write onto the existing node.
 export type ImportResolution =
   | { action: 'create' }
   | { action: 'skip' }
-  | { action: 'merge'; nodeId: string; overwrite: string[]; updatedAt: string }
+  | { action: 'merge'; nodeId: string; fields: string[]; updatedAt: string }
 
 export interface ImportSummary {
   created: number

@@ -51,14 +51,20 @@ soft-delete, `updatedAt`/`updatedBy`, and appends `link`/`unlink` edit-log rows.
 **Phase 4 (current): GEDCOM import/export.** Bring a family tree in from (or send
 it out to) any genealogy tool via GEDCOM 5.5.1 (`INDI`/`FAM` core). Any member
 may import/export. Parsing + mapping + serialization are pure in
-`lib/gedcom.js`; the DynamoDB-facing matching/writing is in `lib/gedcom-import.js`.
+`lib/gedcom.js`; person matching is a pure weighted-scoring model in
+`lib/gedcom-match.js` (name via exact/nickname/typo/initial, birth/death by
+exact-or-year with a conflicting-year penalty, tiered strong/possible); the
+DynamoDB-facing matching/writing is in `lib/gedcom-import.js`.
 Our model is narrower than GEDCOM, so `SEX` and birth/death `PLAC` are folded
 into `notes` with a `Label: value` convention that export reads back to rebuild
 the tags (a deliberately lossy-but-legible round trip). Import is **two-phase**:
-`POST .../import/preview` diffs a file against the tree (no writes) and returns
-likely-duplicate matches with per-field `fills` (tree is empty → auto-filled) vs
-`conflicts` (both differ → caller chooses); `POST .../import/commit` applies the
-caller's per-person resolutions (`create`/`merge`/`skip`, keyed by GEDCOM xref)
+`POST .../import/preview` diffs a file against the tree (no writes) and, per
+imported person, returns ranked match **candidates** — scored on name + dates and
+then boosted when they share a relative already in the tree (a two-pass
+structural signal) — each with a per-field diff (`same`/`fill`/`conflict`/
+`treeOnly`) and the relationships the person brings; `POST .../import/commit`
+applies the caller's per-person resolutions (`create`/`merge` into a chosen
+candidate with chosen `fields`/`skip`, keyed by GEDCOM xref)
 then wires relationships via `createEdge` (reusing its referential-integrity +
 one-relationship-per-pair rules; a duplicate/self-loop is skipped, not fatal).
 The client re-sends the same GEDCOM text on commit, so nothing is staged
@@ -151,7 +157,8 @@ Phase 4 GEDCOM routes (backed by the `gedcom` handler; any member):
 - `src/auth.ts`, `src/api.ts` — client auth state + fetch wrapper
 - `backend/lib/` — `auth`, `dynamo`, `accounts`, `groups` (incl. membership
   management), `invites`, `links` (identity linking), `nodes`, `edges`, `graph`,
-  `gedcom` (pure parse/map/serialize), `gedcom-import` (preview/commit),
+  `gedcom` (pure parse/map/serialize), `gedcom-match` (pure person-scoring),
+  `gedcom-import` (preview/commit),
   `http` (auth+membership gate; returns the caller's membership row), `ids`,
   `errors`, `response`
 - `backend/handlers/` — `me`, `groups`, `graph`, `nodes`, `edges`, `members`,

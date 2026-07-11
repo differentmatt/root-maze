@@ -10,6 +10,8 @@ import {
   type ImportResolution,
   type ImportSummary,
   type ImportedFields,
+  type MatchCandidate,
+  type ImportRelationship,
 } from '../api'
 
 // GEDCOM import/export lives in the Group tab. Export is a one-click download of
@@ -28,13 +30,14 @@ const FIELD_LABELS: Record<keyof ImportedFields, string> = {
   notes: 'Notes',
 }
 
-// Per-person decisions, keyed by GEDCOM xref. `merge` is the default for a
-// matched person; unmatched people default to `create` (and aren't tracked
-// here unless the user chooses to skip them).
+// Per-person review decision, keyed by GEDCOM xref.
+//   action  — merge into an existing person / add as new / skip entirely
+//   nodeId  — which candidate to merge into (people can have several)
+//   fields  — which imported fields to write onto that person on merge
 type Decision = {
   action: 'merge' | 'create' | 'skip'
-  // For a merge: fields where the imported value should overwrite the existing.
-  overwrite: Set<string>
+  nodeId: string | null
+  fields: Set<string>
 }
 
 export default function ImportExport({
@@ -197,9 +200,23 @@ function ImportDone({
   )
 }
 
-// The heart of "review & confirm": show every person the file would add, mark
-// the ones that look like existing people, and let the user decide merge /
-// import-as-new / skip and pick a winner for each conflicting field.
+// The default fields to apply when merging into a candidate: everything the
+// tree is missing (a "fill"). Conflicts start off, for the user to opt into.
+function defaultMergeFields(candidate: MatchCandidate): Set<string> {
+  return new Set(
+    candidate.fieldDiffs.filter((d) => d.status === 'fill').map((d) => d.field),
+  )
+}
+
+const RELATION_LABEL: Record<ImportRelationship['relation'], string> = {
+  partner: 'partner',
+  parent: 'parent',
+  child: 'child',
+}
+
+// The heart of "review & confirm": one card per imported person showing ranked
+// candidate matches, side-by-side fields, the data/relationships they bring, and
+// the merge / add-new / skip decision.
 function ReviewPanel({
   preview,
   onCancel,
@@ -209,16 +226,20 @@ function ReviewPanel({
   onCancel: () => void
   onConfirm: (resolutions: Record<string, ImportResolution>) => void
 }) {
-  const matched = preview.people.filter((p) => p.match)
-  const fresh = preview.people.filter((p) => !p.match)
-
-  // Only matched people need a stored decision; everyone else defaults to
-  // `create`. Fresh (unmatched) people are seeded here too so the user can
-  // choose to skip them.
   const [decisions, setDecisions] = useState<Record<string, Decision>>(() => {
     const seed: Record<string, Decision> = {}
-    for (const p of matched) seed[p.xref] = { action: 'merge', overwrite: new Set() }
-    for (const p of fresh) seed[p.xref] = { action: 'create', overwrite: new Set() }
+    for (const p of preview.people) {
+      const cand = p.suggestedNodeId
+        ? p.candidates.find((c) => c.nodeId === p.suggestedNodeId)
+        : p.candidates[0]
+      seed[p.xref] = {
+        // Only a suggested (strong, unambiguous) match defaults to merge; a mere
+        // "possible" match is surfaced but defaults to adding a new person.
+        action: p.suggestedNodeId ? 'merge' : 'create',
+        nodeId: cand ? cand.nodeId : null,
+        fields: cand ? defaultMergeFields(cand) : new Set(),
+      }
+    }
     return seed
   })
 
@@ -226,93 +247,78 @@ function ReviewPanel({
     setDecisions((d) => ({ ...d, [xref]: { ...d[xref], action } }))
   }
 
-  function toggleOverwrite(xref: string, field: string) {
+  function selectCandidate(xref: string, candidate: MatchCandidate) {
+    setDecisions((d) => ({
+      ...d,
+      [xref]: { action: 'merge', nodeId: candidate.nodeId, fields: defaultMergeFields(candidate) },
+    }))
+  }
+
+  function toggleField(xref: string, field: string) {
     setDecisions((d) => {
-      const next = new Set(d[xref].overwrite)
+      const next = new Set(d[xref].fields)
       if (next.has(field)) next.delete(field)
       else next.add(field)
-      return { ...d, [xref]: { ...d[xref], overwrite: next } }
+      return { ...d, [xref]: { ...d[xref], fields: next } }
     })
   }
 
   function confirm() {
     const resolutions: Record<string, ImportResolution> = {}
-    for (const p of [...matched, ...fresh]) {
+    for (const p of preview.people) {
       const d = decisions[p.xref]
       if (d.action === 'skip') {
         resolutions[p.xref] = { action: 'skip' }
-      } else if (d.action === 'create' || !p.match) {
-        resolutions[p.xref] = { action: 'create' }
-      } else {
+        continue
+      }
+      const cand = d.action === 'merge' && d.nodeId
+        ? p.candidates.find((c) => c.nodeId === d.nodeId)
+        : undefined
+      if (cand) {
         resolutions[p.xref] = {
           action: 'merge',
-          nodeId: p.match.nodeId,
-          updatedAt: p.match.updatedAt,
-          overwrite: [...d.overwrite],
+          nodeId: cand.nodeId,
+          updatedAt: cand.updatedAt,
+          fields: [...d.fields],
         }
+      } else {
+        resolutions[p.xref] = { action: 'create' }
       }
     }
     onConfirm(resolutions)
   }
 
+  const { strongMatches, possibleMatches, newPeople } = preview.stats
+  const summary = [
+    strongMatches && `${strongMatches} likely match${strongMatches === 1 ? '' : 'es'}`,
+    possibleMatches && `${possibleMatches} possible`,
+    newPeople && `${newPeople} new`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <div className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
       <div>
         <p className="text-sm font-medium text-zinc-200">Review import</p>
         <p className="text-xs text-zinc-500">
           {preview.stats.people} people, {preview.stats.relationships} relationships
-          {preview.stats.matches > 0 &&
-            ` · ${preview.stats.matches} look like existing people`}
+          {summary && ` · ${summary}`}
         </p>
       </div>
 
-      {matched.length > 0 && (
-        <div className="flex flex-col gap-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-            Possible duplicates
-          </p>
-          {matched.map((p) => (
-            <MatchRow
-              key={p.xref}
-              person={p}
-              decision={decisions[p.xref]}
-              onAction={(a) => setAction(p.xref, a)}
-              onToggleOverwrite={(f) => toggleOverwrite(p.xref, f)}
-            />
-          ))}
-        </div>
-      )}
-
-      {fresh.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-            New people ({fresh.length})
-          </p>
-          {fresh.map((p) => (
-            <div
-              key={p.xref}
-              className="flex items-center justify-between gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-2"
-            >
-              <p className="text-sm text-zinc-300">{p.fullName}</p>
-              <div className="flex gap-1 rounded border border-zinc-800 p-0.5 text-xs">
-                {(['create', 'skip'] as const).map((a) => (
-                  <button
-                    key={a}
-                    onClick={() => setAction(p.xref, a)}
-                    className={`rounded px-2 py-1 capitalize ${
-                      decisions[p.xref]?.action === a
-                        ? 'bg-zinc-100 text-zinc-900'
-                        : 'text-zinc-400 hover:text-zinc-200'
-                    }`}
-                  >
-                    {a === 'create' ? 'Add' : a}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="flex flex-col gap-3">
+        {preview.people.map((p) => (
+          <PersonReview
+            key={p.xref}
+            person={p}
+            decision={decisions[p.xref]}
+            onAction={(a) => setAction(p.xref, a)}
+            onSelectCandidate={(c) => selectCandidate(p.xref, c)}
+            onToggleField={(f) => toggleField(p.xref, f)}
+          />
+        ))}
+      </div>
 
       <div className="flex items-center gap-2">
         <button
@@ -332,93 +338,155 @@ function ReviewPanel({
   )
 }
 
-function MatchRow({
+function PersonReview({
   person,
   decision,
   onAction,
-  onToggleOverwrite,
+  onSelectCandidate,
+  onToggleField,
 }: {
   person: ImportPerson
   decision: Decision
   onAction: (a: Decision['action']) => void
-  onToggleOverwrite: (field: string) => void
+  onSelectCandidate: (c: MatchCandidate) => void
+  onToggleField: (field: string) => void
 }) {
-  const match = person.match!
+  const hasCandidates = person.candidates.length > 0
+  const selected = person.candidates.find((c) => c.nodeId === decision.nodeId)
+  const tag = person.suggestedNodeId
+    ? { text: 'Likely match', cls: 'text-emerald-300' }
+    : hasCandidates
+      ? { text: 'Possible match', cls: 'text-amber-300' }
+      : { text: 'New', cls: 'text-zinc-500' }
+
+  const actions = hasCandidates
+    ? (['merge', 'create', 'skip'] as const)
+    : (['create', 'skip'] as const)
+
   return (
     <div className="flex flex-col gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-zinc-200">
-          {person.fullName}{' '}
-          <span className="text-zinc-500">↔ existing “{match.name}”</span>
+          {person.fullName} <span className={`text-xs ${tag.cls}`}>· {tag.text}</span>
         </p>
         <div className="flex gap-1 rounded border border-zinc-800 p-0.5 text-xs">
-          {(['merge', 'create', 'skip'] as const).map((a) => (
+          {actions.map((a) => (
             <button
               key={a}
               onClick={() => onAction(a)}
-              className={`rounded px-2 py-1 capitalize ${
+              className={`rounded px-2 py-1 ${
                 decision.action === a
                   ? 'bg-zinc-100 text-zinc-900'
                   : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
-              {a === 'create' ? 'Add new' : a}
+              {a === 'merge' ? 'Merge' : a === 'create' ? 'Add new' : 'Skip'}
             </button>
           ))}
         </div>
       </div>
 
-      {decision.action === 'merge' && (
+      {person.relationships.length > 0 && (
+        <p className="text-xs text-zinc-500">
+          From file:{' '}
+          {person.relationships
+            .map((r) => `${RELATION_LABEL[r.relation]} ${r.otherName}`)
+            .join(' · ')}
+        </p>
+      )}
+
+      {decision.action === 'merge' && hasCandidates && (
         <div className="flex flex-col gap-2">
-          {match.fills.length > 0 && (
-            <p className="text-xs text-zinc-500">
-              Fills in:{' '}
-              {match.fills
-                .map((f) => FIELD_LABELS[f.field])
-                .join(', ')}
-            </p>
+          {person.candidates.length > 1 && (
+            <div className="flex flex-col gap-1">
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                Merge into
+              </p>
+              {person.candidates.map((c) => (
+                <label
+                  key={c.nodeId}
+                  className="flex items-start gap-2 text-xs text-zinc-300"
+                >
+                  <input
+                    type="radio"
+                    name={`cand-${person.xref}`}
+                    checked={decision.nodeId === c.nodeId}
+                    onChange={() => onSelectCandidate(c)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="text-zinc-100">{c.name}</span>{' '}
+                    <span className="text-zinc-500">— {c.reasons.join(', ')}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
           )}
-          {match.conflicts.map((c) => {
-            const useImported = decision.overwrite.has(c.field)
-            return (
-              <div
-                key={c.field}
-                className="flex flex-col gap-1 rounded border border-amber-900/40 bg-amber-950/20 p-2 text-xs"
-              >
-                <p className="font-medium text-amber-300">
-                  {FIELD_LABELS[c.field]} differs
-                </p>
-                <label className="flex items-start gap-2 text-zinc-300">
-                  <input
-                    type="radio"
-                    checked={!useImported}
-                    onChange={() =>
-                      useImported && onToggleOverwrite(c.field)
-                    }
-                    className="mt-0.5"
-                  />
-                  <span>
-                    Keep current: <span className="text-zinc-100">{c.existing}</span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-zinc-300">
-                  <input
-                    type="radio"
-                    checked={useImported}
-                    onChange={() =>
-                      !useImported && onToggleOverwrite(c.field)
-                    }
-                    className="mt-0.5"
-                  />
-                  <span>
-                    Use imported: <span className="text-zinc-100">{c.imported}</span>
-                  </span>
-                </label>
-              </div>
-            )
-          })}
+          {selected && (
+            <FieldTable
+              candidate={selected}
+              apply={decision.fields}
+              onToggle={onToggleField}
+            />
+          )}
         </div>
       )}
+    </div>
+  )
+}
+
+// Side-by-side field comparison of the imported record vs the chosen candidate.
+// `fill` and `conflict` rows get an apply checkbox; `same`/`treeOnly` are shown
+// muted for context (nothing to decide).
+function FieldTable({
+  candidate,
+  apply,
+  onToggle,
+}: {
+  candidate: MatchCandidate
+  apply: Set<string>
+  onToggle: (field: string) => void
+}) {
+  const rows = candidate.fieldDiffs.filter((d) => d.status !== 'same')
+  if (!rows.length) {
+    return <p className="text-xs text-zinc-500">Nothing new to add — identical fields.</p>
+  }
+  return (
+    <div className="flex flex-col gap-1 rounded border border-zinc-800 p-2">
+      {rows.map((d) => {
+        const editable = d.status === 'fill' || d.status === 'conflict'
+        return (
+          <label
+            key={d.field}
+            className={`flex items-start gap-2 text-xs ${
+              editable ? 'text-zinc-300' : 'text-zinc-500'
+            }`}
+          >
+            <input
+              type="checkbox"
+              disabled={!editable}
+              checked={editable ? apply.has(d.field) : false}
+              onChange={() => onToggle(d.field)}
+              className="mt-0.5 disabled:opacity-30"
+            />
+            <span className="min-w-0">
+              <span className="text-zinc-400">{FIELD_LABELS[d.field]}: </span>
+              {d.status === 'fill' && (
+                <span className="text-zinc-100">add “{d.imported}”</span>
+              )}
+              {d.status === 'conflict' && (
+                <span>
+                  <span className="text-zinc-100">“{d.imported}”</span>
+                  <span className="text-zinc-500"> (replaces “{d.existing}”)</span>
+                </span>
+              )}
+              {d.status === 'treeOnly' && (
+                <span className="text-zinc-500">keep “{d.existing}” (not in file)</span>
+              )}
+            </span>
+          </label>
+        )
+      })}
     </div>
   )
 }
