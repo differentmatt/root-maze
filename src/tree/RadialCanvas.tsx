@@ -43,41 +43,29 @@ const CHAR_W = 0.56 // approx glyph width as a fraction of font size
 const LABEL_PAD = 5
 
 // Place and size a wedge's label so it always reads upright and fits.
-//   - A fat wedge gets *tangential* text (following the ring), flipped to stay
-//     upright on the lower half instead of hanging upside down.
-//   - A thin sliver (arc narrower than the wedge is deep) gets *radial* text
-//     reading outward, flipped on the left half so it's never upside down —
+//   - A fat wedge (or a thin spouse band) gets *curved* text following the ring,
+//     via a mid-radius arc path — so a label never reads as a straight chord
+//     across a curved band. The arc is drawn left-to-right and flipped on the
+//     lower half so text is never upside down.
+//   - A thin sliver (arc narrower than the wedge is deep) gets straight *radial*
+//     text reading outward, flipped on the left half so it's never upside down —
 //     which fits a name a cramped arc never could.
 // The font shrinks to fit the available length (down to LABEL_MIN) before the
 // name is truncated with an ellipsis, and is capped by the wedge's thickness so
 // text never spills across the band.
-function labelLayout(w: Wedge, name: string) {
+type LabelLayout =
+  | { curved: false; x: number; y: number; rot: number; fontSize: number; text: string }
+  | { curved: true; path: string; fontSize: number; text: string }
+
+function labelLayout(w: Wedge, name: string): LabelLayout {
   const mid = (w.a0 + w.a1) / 2
   const rMid = (w.r0 + w.r1) / 2
-  const x = rMid * Math.cos(mid)
-  const y = -rMid * Math.sin(mid)
-  const midDeg = (mid * 180) / Math.PI
   const arc = (w.a1 - w.a0) * rMid
   const band = w.r1 - w.r0
   const radial = arc < band
 
-  let rot: number
-  let length: number // space along the text baseline
-  let thickness: number // space across it
-  if (radial) {
-    rot = -midDeg
-    if (Math.cos(mid) < 0) rot += 180 // keep upright on the left half
-    length = band
-    thickness = arc
-  } else {
-    rot = 90 - midDeg
-    // Normalize into [-90, 90] so lower-half labels aren't upside down.
-    while (rot < -90) rot += 180
-    while (rot > 90) rot -= 180
-    length = arc
-    thickness = band
-  }
-
+  const length = radial ? band : arc // space along the text baseline
+  const thickness = radial ? arc : band // space across it
   let fontSize = Math.min(LABEL_BASE, thickness * 0.82)
   const avail = Math.max(0, length - LABEL_PAD)
   if (name.length * fontSize * CHAR_W > avail) {
@@ -85,7 +73,28 @@ function labelLayout(w: Wedge, name: string) {
   }
   const fitChars = Math.max(1, Math.floor(avail / (fontSize * CHAR_W)))
   const text = name.length > fitChars ? `${name.slice(0, fitChars - 1)}…` : name
-  return { x, y, rot, fontSize, text }
+
+  if (radial) {
+    let rot = -(mid * 180) / Math.PI
+    if (Math.cos(mid) < 0) rot += 180 // keep upright on the left half
+    return { curved: false, x: rMid * Math.cos(mid), y: -rMid * Math.sin(mid), rot, fontSize, text }
+  }
+
+  // Curved: an arc at mid-radius spanning the wedge. On the upper half draw it
+  // right-to-left (sweep 1) so the text runs left-to-right upright; on the lower
+  // half draw left-to-right (sweep 0) so it isn't upside down.
+  const pt = (a: number) =>
+    `${(rMid * Math.cos(a)).toFixed(2)} ${(-rMid * Math.sin(a)).toFixed(2)}`
+  const upper = Math.sin(mid) > 0
+  const path = upper
+    ? `M ${pt(w.a1)} A ${rMid} ${rMid} 0 0 1 ${pt(w.a0)}`
+    : `M ${pt(w.a0)} A ${rMid} ${rMid} 0 0 0 ${pt(w.a1)}`
+  return { curved: true, path, fontSize, text }
+}
+
+// A DOM-id-safe suffix for a wedge's label path.
+function labelPathId(id: string): string {
+  return `lp-${id.replace(/[^\w-]/g, '')}`
 }
 
 // The ego-centric radial chart: the focus person as a disc at the center, with
@@ -266,17 +275,36 @@ export default function RadialCanvas({
                     nonBio || (spouse && w.ended) || halfSib ? '4 3' : undefined
                   }
                 />
-                <text
-                  x={lbl.x}
-                  y={lbl.y}
-                  transform={`rotate(${lbl.rot} ${lbl.x} ${lbl.y})`}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontSize={lbl.fontSize}
-                  fill={spouse ? '#fecdd3' : '#f4f4f5'}
-                >
-                  {lbl.text}
-                </text>
+                {lbl.curved ? (
+                  <>
+                    <path id={labelPathId(w.id)} d={lbl.path} fill="none" />
+                    <text
+                      fontSize={lbl.fontSize}
+                      dominantBaseline="central"
+                      fill={spouse ? '#fecdd3' : '#f4f4f5'}
+                    >
+                      <textPath
+                        href={`#${labelPathId(w.id)}`}
+                        startOffset="50%"
+                        textAnchor="middle"
+                      >
+                        {lbl.text}
+                      </textPath>
+                    </text>
+                  </>
+                ) : (
+                  <text
+                    x={lbl.x}
+                    y={lbl.y}
+                    transform={`rotate(${lbl.rot} ${lbl.x} ${lbl.y})`}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fontSize={lbl.fontSize}
+                    fill={spouse ? '#fecdd3' : '#f4f4f5'}
+                  >
+                    {lbl.text}
+                  </text>
+                )}
               </g>
             )
           })}
