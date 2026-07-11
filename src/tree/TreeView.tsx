@@ -320,11 +320,14 @@ const cardClass =
 const primaryBtn =
   'rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 disabled:opacity-40'
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
 // Birth/death dates are stored free-form, so they can hold anything GEDCOM does
-// — a full date, a year, or an approximate value like "ABT 1850". A plain text
-// field (not a native date picker, which only represents full ISO dates) is
-// what lets those through, lets a year be typed, and lets the value be cleared
-// reliably on every device.
+// — a full date, a year, or an approximate value like "ABT 1850". The editable
+// field is therefore a plain text box (it clears reliably and accepts a year or
+// an approximate date, which a native date input can't). A calendar button
+// summons the native date picker for the common exact-date case, writing the
+// chosen ISO date back into the text field.
 function DateField({
   value,
   onChange,
@@ -334,14 +337,36 @@ function DateField({
   onChange: (v: string) => void
   placeholder: string
 }) {
+  const picker = useRef<HTMLInputElement>(null)
   return (
-    <input
-      type="text"
-      className={inputClass}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-    />
+    <div className="relative">
+      <input
+        type="text"
+        className={`${inputClass} pr-9`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+      {/* Hidden native date input, opened by the calendar button. Seeded with
+          the current value only when it's a full ISO date the picker can show. */}
+      <input
+        ref={picker}
+        type="date"
+        tabIndex={-1}
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-0 right-2 h-0 w-0 opacity-0"
+        value={ISO_DATE.test(value) ? value : ''}
+        onChange={(e) => e.target.value && onChange(e.target.value)}
+      />
+      <button
+        type="button"
+        aria-label="Pick a date"
+        onClick={() => picker.current?.showPicker?.()}
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1 text-zinc-400 hover:text-zinc-200"
+      >
+        📅
+      </button>
+    </div>
   )
 }
 
