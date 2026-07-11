@@ -54,6 +54,15 @@ describe('parseGedcom', () => {
     const records = parseGedcom('\n\nnot a gedcom line\n0 @I1@ INDI\n')
     expect(records).toHaveLength(1)
   })
+
+  it('parses a real-world file: UTF-8 BOM + CRLF line endings', () => {
+    // How Ancestry / FamilySearch / MyHeritage actually write .ged files.
+    const withBom = '\uFEFF0 HEAD\r\n1 SOUR ANCESTRY\r\n0 @I1@ INDI\r\n1 NAME Ada /King/\r\n0 TRLR\r\n'
+    const records = parseGedcom(withBom)
+    expect(records[0].tag).toBe('HEAD')
+    const indi = records.find((r) => r.tag === 'INDI')
+    expect(indi.xref).toBe('@I1@')
+  })
 })
 
 describe('gedcomToImport', () => {

@@ -38,7 +38,10 @@ export function parseGedcom(text) {
   // attaches to stack[L-1].
   const stack = []
 
-  for (const raw of String(text).split(/\r\n|\r|\n/)) {
+  // Real-world exports (Ancestry, FamilySearch, MyHeritage) are UTF-8 with a
+  // leading byte-order mark; strip it so the first "0 HEAD" line still parses.
+  const clean = String(text).replace(/^\uFEFF/, '')
+  for (const raw of clean.split(/\r\n|\r|\n/)) {
     if (!raw.trim()) continue
     const m = LINE.exec(raw)
     if (!m) continue // tolerate junk lines rather than failing the whole import

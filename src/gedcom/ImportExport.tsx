@@ -527,7 +527,11 @@ function FilePicker({
       {label}
       <input
         type="file"
-        accept=".ged,.gedcom,text/plain"
+        // Be generous: a .GED file is reported with all sorts of MIME types
+        // (Windows often calls it application/octet-stream) and case-sensitive
+        // pickers grey out .GED against a lowercase ".ged" hint. We validate the
+        // content server-side, so the picker only needs to let the file through.
+        accept=".ged,.gedcom,.GED,.GEDCOM,application/x-gedcom,text/vnd.familysearch.gedcom,text/plain,application/octet-stream"
         disabled={disabled}
         className="hidden"
         onChange={(e) => {
