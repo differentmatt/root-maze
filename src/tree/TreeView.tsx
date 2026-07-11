@@ -1061,7 +1061,6 @@ function RelationshipsSection({
   const [error, setError] = useState<string | null>(null)
 
   async function removeEdge(edgeId: string) {
-    if (!window.confirm('Remove this relationship?')) return
     setBusyId(edgeId)
     setError(null)
     try {
