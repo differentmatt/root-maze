@@ -987,11 +987,19 @@ function DeleteSection({
   person: PersonNode
   onDeleted: () => void
 }) {
-  const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function remove() {
+    // A person delete cascades to their relationships and can't be undone, so
+    // gate it behind an explicit confirmation dialog.
+    if (
+      !window.confirm(
+        `Delete ${person.name}? This also removes their relationships and can’t be undone.`,
+      )
+    ) {
+      return
+    }
     setBusy(true)
     setError(null)
     try {
@@ -1006,38 +1014,14 @@ function DeleteSection({
 
   return (
     <div className="border-t border-zinc-800 pt-3">
-      {!confirming ? (
-        <button
-          onClick={() => setConfirming(true)}
-          className="text-sm text-red-400 hover:text-red-300"
-        >
-          Delete person
-        </button>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-zinc-300">
-            Delete {person.name}? This also removes their relationships and can’t
-            be undone.
-          </p>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          <div className="flex gap-2">
-            <button
-              onClick={remove}
-              disabled={busy}
-              className="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-40"
-            >
-              {busy ? 'Deleting…' : 'Delete'}
-            </button>
-            <button
-              onClick={() => setConfirming(false)}
-              disabled={busy}
-              className="rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      <button
+        onClick={remove}
+        disabled={busy}
+        className="text-sm text-red-400 hover:text-red-300 disabled:opacity-40"
+      >
+        {busy ? 'Deleting…' : 'Delete person'}
+      </button>
+      {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
     </div>
   )
 }
@@ -1077,6 +1061,7 @@ function RelationshipsSection({
   const [error, setError] = useState<string | null>(null)
 
   async function removeEdge(edgeId: string) {
+    if (!window.confirm('Remove this relationship?')) return
     setBusyId(edgeId)
     setError(null)
     try {

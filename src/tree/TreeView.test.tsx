@@ -231,22 +231,26 @@ describe('TreeView', () => {
     expect(screen.getByText(/Unlink there first/)).toBeInTheDocument()
   })
 
-  it('requires confirmation before deleting a person', async () => {
+  it('confirms before deleting a person, and aborts if declined', async () => {
     vi.mocked(getGraph).mockResolvedValue(graph)
     vi.mocked(deleteNode).mockResolvedValue({ deleted: true })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<TreeView group={group} />)
 
     await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
     fireEvent.click(screen.getByText('Ada'))
 
+    // Declining the confirmation does not delete.
     fireEvent.click(screen.getByText('Delete person'))
-    expect(screen.getByText(/Delete Ada\?/)).toBeInTheDocument()
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringMatching(/Delete Ada\?/))
     expect(deleteNode).not.toHaveBeenCalled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
-    await waitFor(() =>
-      expect(deleteNode).toHaveBeenCalledWith('grp_1', 'nod_a'),
-    )
+    // Accepting it deletes.
+    confirmSpy.mockReturnValue(true)
+    fireEvent.click(screen.getByText('Delete person'))
+    await waitFor(() => expect(deleteNode).toHaveBeenCalledWith('grp_1', 'nod_a'))
+
+    confirmSpy.mockRestore()
   })
 })
 
