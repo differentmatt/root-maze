@@ -56,20 +56,10 @@ export interface RadialNode {
   half?: boolean
 }
 
-// A small derived node standing in for a family: a couple (or single parent)
-// and their shared children hang off it, so the chart collapses N parent→child
-// edges into one stem per family.
-export interface UnionJunction {
-  id: string
-  x: number
-  y: number
-}
-
 // How an edge should be drawn:
 //   - 'radial'    a straight spoke between adjacent rings,
-//   - 'unionStem' a stem to/from a union junction (collapsed shared-parent edge),
-//   - 'chord'     a curved cross-wedge link (a marriage, or a person reached a
-//                 second way) that would otherwise cut across the tree.
+//   - 'unionStem' a light stem tying a sibling to the focus,
+//   - 'chord'     a curved link (e.g. a childless partner beside the focus).
 export type RadialEdgeStyle = 'radial' | 'unionStem' | 'chord'
 
 export interface RadialEdge {
@@ -88,29 +78,36 @@ export interface RadialEdge {
   ended?: boolean
 }
 
-// An ancestor drawn as a filled arc segment (a fan-chart wedge) rather than a
-// node: adjacency is implied by nesting, so the ancestor half is dense and
-// crossing-free. Angles are math-convention (0 = right, π/2 = up); the renderer
-// flips y so the fan sweeps across the upper half. `lineage` groups a wedge into
-// one of the focus's ancestral branches for color-coding; `subtype` is the
-// parent→child relationship into the *inner* (child) person, so a step/adoptive
-// link can be styled distinctly.
-export interface AncestorWedge {
+// A person drawn as a filled arc segment (a fan-chart wedge) rather than a node:
+// adjacency is implied by nesting, so both fans are dense and crossing-free.
+// Angles are math-convention (0 = right, π/2 = up); the renderer flips y so
+// ancestors sweep the upper half and descendants the lower half.
+//   - kind 'ancestor'   — a parent/grandparent, colored by ancestral branch.
+//   - kind 'descendant' — a child/grandchild, colored by descent line.
+//   - kind 'spouse'     — a thin band at the base of a union's children naming
+//                         the married-in co-parent (which a fan can't nest).
+// `lineage` groups a wedge into a branch for coloring; `subtype` is the
+// parent→child relationship (a step/adoptive link is styled distinctly);
+// `ended` marks a spouse band whose marriage has ended.
+export type WedgeKind = 'ancestor' | 'descendant' | 'spouse'
+
+export interface Wedge {
   id: string
+  kind: WedgeKind
   r0: number
   r1: number
   a0: number
   a1: number
   ring: number
-  lineage: number
+  lineage?: number
   subtype?: string
+  ended?: boolean
 }
 
 export interface RadialLayout {
   nodes: RadialNode[]
   edges: RadialEdge[]
-  junctions: UnionJunction[]
-  wedges: AncestorWedge[]
+  wedges: Wedge[]
   // Content bounding box, so the canvas can fit the whole chart in view.
   minX: number
   minY: number
@@ -118,38 +115,31 @@ export interface RadialLayout {
   height: number
 }
 
-// Radial distance between descendant generations (node side).
+// Spacing for the sibling nodes flanking the center (the one non-wedge element).
 const RING_GAP = 110
-// Fraction of a hemisphere the descendant fan spans (a sliver is left at the
-// horizontal so it reads as clearly separate from the ancestor fan above).
-const HEMI_SPAN = Math.PI * 0.92
-// Where a family's union junction sits between a parent ring and the child ring.
-const JUNCTION_FRAC = 0.72
-// Where a married-in co-parent sits between their partner and the union — far
-// enough out that the focus's spouses don't pile onto the center.
-const SPOUSE_FRAC = 0.55
-// Column spacing for the focus's siblings flanking the center.
 const SIBLING_SPREAD = RING_GAP * 0.62
 
-// Ancestor wedge geometry. The focus is a disc of radius CENTER_R; each ancestor
-// generation is a ring of thickness ANC_BAND outward from it, drawn across the
-// upper half (a small gap is left at the horizontal so the fan doesn't touch the
-// descendant side).
+// Wedge geometry. The focus is a disc of radius CENTER_R; each generation is a
+// ring of thickness *_BAND outward from it — ancestors across the upper half,
+// descendants across the lower half, each leaving a gap at the horizontal so the
+// two fans read as distinct and the siblings have room between them.
 const CENTER_R = 30
 const ANC_BAND = 52
-// A gap is left at the horizontal so the fan doesn't reach down onto the
-// siblings flanking the focus.
-const ANC_A0 = Math.PI * 0.08
-const ANC_A1 = Math.PI * 0.92
-// Fan depth cap (generations of ancestors drawn as wedges).
+const DESC_BAND = 52
+// Gaps at the horizontal keep the two fans distinct and leave a clear channel
+// on the left and right for the focus's siblings and childless partners.
+const ANC_A0 = Math.PI * 0.1
+const ANC_A1 = Math.PI * 0.9
+const DESC_A0 = Math.PI * 1.1
+const DESC_A1 = Math.PI * 1.9
+// Thickness of the spouse band drawn at the inner edge of a union's children.
+const SPOUSE_BAND = 13
+// Fan depth cap (generations drawn as wedges, either direction).
 const MAX_RING = 8
-// Depth cap so a data cycle can't recurse forever (mirrors layout.ts's cap).
-const MAX_DEPTH = 40
 
 const EMPTY: RadialLayout = {
   nodes: [],
   edges: [],
-  junctions: [],
   wedges: [],
   minX: 0,
   minY: 0,
@@ -247,8 +237,7 @@ export function computeRadialLayout(
 
   const nodes: RadialNode[] = []
   const edgeList: RadialEdge[] = []
-  const junctions: UnionJunction[] = []
-  const wedges: AncestorWedge[] = []
+  const wedges: Wedge[] = []
   const posOf = new Map<string, Point>()
   const placed = new Set<string>()
   let seq = 0
@@ -267,11 +256,6 @@ export function computeRadialLayout(
     placed.add(id)
     nodes.push({ id, x: p.x, y: p.y, ring, angle, role, half })
     return p
-  }
-  const addJunction = (p: Point): UnionJunction => {
-    const j: UnionJunction = { id: `union-${seq++}`, x: p.x, y: p.y }
-    junctions.push(j)
-    return j
   }
   const addEdge = (
     a: Point,
@@ -309,35 +293,13 @@ export function computeRadialLayout(
 
   const focusPoint = place(focusId, 0, Math.PI / 2, 'focus')
 
-  // --- Ancestors: a fan of nested wedges across the upper half --------------
+  // --- Ancestors above, descendants below, both as nested wedge fans --------
   wedgeAncestors(focusId, 1, ANC_A0, ANC_A1, -1)
+  wedgeDescendants(focusId, 1, DESC_A0, DESC_A1, -1)
 
-  // --- The focus's siblings: nodes flanking the center, sharing the fan above
-  placeFocusSiblings()
-
-  // --- Descendants (lower hemisphere), plus the focus's spouses -------------
-  placeDescendants(
-    focusId,
-    focusPoint,
-    0,
-    (3 * Math.PI) / 2 - HEMI_SPAN / 2,
-    (3 * Math.PI) / 2 + HEMI_SPAN / 2,
-  )
-
-  // --- Focus's partners who share no children (pure spouses) ----------------
-  // Descendants placed co-parents already; anyone left is a childless partner,
-  // flanked just below the focus on the horizontal.
-  const loosePartners = sortedPartners(focusId).filter((p) => !placed.has(p))
-  loosePartners.forEach((pid, i) => {
-    const side = i % 2 === 0 ? 1 : -1
-    const step = Math.floor(i / 2) + 1
-    // Flank the focus horizontally, nudged just below so it reads as a spouse
-    // beside the focus rather than a sibling above it.
-    const p = { x: side * step * SIBLING_SPREAD, y: RING_GAP * 0.28 }
-    placeAt(pid, p, 0, side > 0 ? 0 : Math.PI, 'spouse')
-    const meta = partnerMeta.get(pairKey(focusId, pid))
-    addEdge(focusPoint, p, 'chord', 'partner', { ended: meta?.ended })
-  })
+  // --- The focus's siblings + childless partners: nodes in the clear
+  // horizontal channel between the two fans, tied to the focus by a light stem.
+  placeFlankers()
 
   return finalize()
 
@@ -377,6 +339,7 @@ export function computeRadialLayout(
       placed.add(pid)
       wedges.push({
         id: pid,
+        kind: 'ancestor',
         r0,
         r1,
         a0: start,
@@ -390,110 +353,119 @@ export function computeRadialLayout(
     })
   }
 
-  // The focus's siblings sit as nodes flanking the center on the horizontal —
-  // clear of the ancestor fan above and the descendant fan below — tied to the
-  // focus by a light stem (they share the parents drawn in the fan). Half-
-  // siblings are flagged so the renderer can mark them.
-  function placeFocusSiblings() {
-    focusSiblings().forEach((s, i) => {
+  // The focus's siblings (sharing the parents in the fan above) and any
+  // childless partners have no wedge — a sibling isn't a descendant and a
+  // childless partner has no children to nest under. Place them as nodes in the
+  // clear horizontal channel between the two fans, alternating left/right, tied
+  // to the focus by a light stem. Half-siblings are flagged for the renderer.
+  function placeFlankers() {
+    const sibs = focusSiblings().map((s) => ({
+      id: s.id,
+      role: 'sibling' as const,
+      half: s.half,
+      ended: undefined as boolean | undefined,
+    }))
+    const loose = sortedPartners(focusId)
+      .filter((p) => !placed.has(p))
+      .map((p) => ({
+        id: p,
+        role: 'spouse' as const,
+        half: false,
+        ended: partnerMeta.get(pairKey(focusId, p))?.ended,
+      }))
+    ;[...sibs, ...loose].forEach((f, i) => {
       const side = i % 2 === 0 ? -1 : 1
       const col = Math.floor(i / 2)
       const sp = placeAt(
-        s.id,
-        { x: side * (CENTER_R + 30 + col * SIBLING_SPREAD), y: RING_GAP * 0.12 },
+        f.id,
+        { x: side * (CENTER_R + 28 + col * SIBLING_SPREAD), y: 0 },
         0,
         side < 0 ? Math.PI : 0,
-        'sibling',
-        s.half,
+        f.role,
+        f.half,
       )
-      addEdge(focusPoint, sp, 'unionStem', 'parent_child')
+      if (f.role === 'spouse') {
+        addEdge(focusPoint, sp, 'chord', 'partner', { ended: f.ended })
+      } else {
+        addEdge(focusPoint, sp, 'unionStem', 'parent_child')
+      }
     })
   }
 
-  // Place `parentId`'s descendants outward into [aStart, aEnd], grouping
-  // children by their other parent so each marriage becomes its own family
-  // wedge (remarriage) hanging off one union junction.
-  function placeDescendants(
+  // Draw `parentId`'s descendants as nested wedges filling [a0, a1] one ring out.
+  // Children are grouped into unions (by their set of other parents), so each
+  // marriage occupies a contiguous block; the married-in co-parent — who isn't a
+  // blood descendant and so has no wedge of their own — is drawn as a thin
+  // "spouse band" at the inner edge of that block. Wedge widths are weighted by
+  // descendant-count so a bushy line gets more arc. `lineage` colors a descent
+  // line: a fresh id per top-level child, inherited further out.
+  function wedgeDescendants(
     parentId: string,
-    parentPoint: Point,
-    parentRing: number,
-    aStart: number,
-    aEnd: number,
+    ring: number,
+    a0: number,
+    a1: number,
+    lineage: number,
   ) {
-    if (parentRing >= MAX_DEPTH) return
+    if (ring > MAX_RING) return
     const unions = groupChildren(parentId)
+      .map((u) => ({ ...u, children: u.children.filter((c) => !placed.has(c)) }))
+      .filter((u) => u.children.length > 0)
     if (unions.length === 0) return
 
-    const childRing = parentRing + 1
-    const weights = unions.map((u) =>
-      u.children.reduce((s, c) => s + descLeaves(c), 0),
-    )
-    const total = weights.reduce((a, b) => a + b, 0) || unions.length
-    let cursor = aStart
-    unions.forEach((u, ui) => {
-      const span = ((aEnd - aStart) * weights[ui]) / total
-      const mid = cursor + span / 2
+    const r0 = CENTER_R + (ring - 1) * DESC_BAND
+    const r1 = CENTER_R + ring * DESC_BAND
+    const weightOf = (ids: string[]) =>
+      ids.reduce((s, c) => s + descLeaves(c), 0)
+    const total = weightOf(unions.flatMap((u) => u.children)) || 1
+    let cursor = a0
+    for (const u of unions) {
+      const uSpan = ((a1 - a0) * weightOf(u.children)) / total
 
-      // Union junction sits between the parent ring and the child ring.
-      const jr = (Math.abs(parentRing) + JUNCTION_FRAC) * RING_GAP
-      const j = addJunction(polar(jr, mid))
-      const hub = { x: j.x, y: j.y }
-      addEdge(parentPoint, hub, 'unionStem', 'parent_child')
-
-      // Married-in co-parent(s): between the parent and the union.
+      // Spouse band: name the married-in co-parent(s) at the base of the block.
       for (const co of u.coParents) {
-        if (placed.has(co)) {
-          // Already on the chart — link with a chord instead of re-placing.
-          const cp = posOf.get(co)!
-          addEdge(hub, cp, 'unionStem', 'parent_child')
-          continue
-        }
-        const sr = (Math.abs(parentRing) + SPOUSE_FRAC) * RING_GAP
-        const cp = place(co, parentRing, mid, 'spouse')
-        // Override radius so the spouse sits inside the junction, not on the
-        // parent's ring (which for the focus would collapse to the center).
-        const sp = polar(sr, mid)
-        cp.x = sp.x
-        cp.y = sp.y
-        const node = nodes.find((n) => n.id === co)!
-        node.x = sp.x
-        node.y = sp.y
-        posOf.set(co, cp)
+        if (placed.has(co)) continue
+        placed.add(co)
         const meta = partnerMeta.get(pairKey(parentId, co))
-        addEdge(parentPoint, cp, 'chord', 'partner', { ended: meta?.ended })
-        addEdge(cp, hub, 'unionStem', 'parent_child')
+        wedges.push({
+          id: co,
+          kind: 'spouse',
+          r0,
+          r1: r0 + SPOUSE_BAND,
+          a0: cursor,
+          a1: cursor + uSpan,
+          ring,
+          ended: meta?.ended,
+        })
       }
+      const bandInset = u.coParents.length > 0 ? SPOUSE_BAND + 2 : 0
 
-      // Children across the union's wedge.
+      // Children across the union's block, weighted by their own descent size.
       const kids = u.children
-      const kWeights = kids.map((c) => descLeaves(c))
-      const kTotal = kWeights.reduce((a, b) => a + b, 0) || kids.length
+      const kTotal = weightOf(kids) || kids.length
       let kCursor = cursor
-      kids.forEach((cid, ci) => {
-        const kSpan = (span * kWeights[ci]) / kTotal
-        const kMid = kCursor + kSpan / 2
-        if (placed.has(cid)) {
-          const cp = posOf.get(cid)!
-          addEdge(hub, cp, 'chord', 'parent_child', {
-            subtype: pcSubtype(parentId, cid),
-          })
-          kCursor += kSpan
-          return
-        }
-        const cp = place(cid, childRing, kMid, 'descendant')
-        // If any parent in this union relates to the child non-biologically,
-        // draw the stem distinctly (dashed/tinted in the renderer).
+      kids.forEach((cid) => {
+        const kSpan = (uSpan * descLeaves(cid)) / kTotal
+        const lin = ring === 1 ? lineageSeq++ : lineage
+        placed.add(cid)
         const bio =
           isBiological(parentId, cid) &&
           u.coParents.every((co) => isBiological(co, cid))
-        addEdge(hub, cp, 'radial', 'parent_child', {
+        wedges.push({
+          id: cid,
+          kind: 'descendant',
+          r0: r0 + bandInset,
+          r1,
+          a0: kCursor,
+          a1: kCursor + kSpan,
+          ring,
+          lineage: lin,
           subtype: bio ? undefined : nonBioSubtype(parentId, u.coParents, cid),
         })
-        placeDescendants(cid, cp, childRing, kCursor, kCursor + kSpan)
+        wedgeDescendants(cid, ring + 1, kCursor, kCursor + kSpan, lin)
         kCursor += kSpan
       })
-      cursor += span
-    })
+      cursor += uSpan
+    }
   }
 
   // Group `parentId`'s (unplaced) children into unions keyed by their set of
@@ -566,7 +538,6 @@ export function computeRadialLayout(
       maxY = Math.max(maxY, y)
     }
     for (const n of nodes) consider(n.x, n.y)
-    for (const j of junctions) consider(j.x, j.y)
     // A wedge's extent is its outer arc, which can bulge past its corners where
     // it crosses an axis — sample the corners plus any axis angle inside [a0,a1].
     for (const w of wedges) {
@@ -588,7 +559,6 @@ export function computeRadialLayout(
     return {
       nodes,
       edges: edgeList,
-      junctions,
       wedges,
       minX,
       minY,

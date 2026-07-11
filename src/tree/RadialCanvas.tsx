@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { PersonNode, Edge } from '../api'
 import {
   computeRadialLayout,
-  type AncestorWedge,
+  type Wedge,
   type RadialInputEdge,
 } from './radial'
 import { usePanZoom, type View } from './panzoom'
@@ -14,7 +14,6 @@ const SIZE = 600
 const MIN_K = 0.1
 const MAX_K = 4
 const NODE_R = 14
-const JUNCTION_R = 3.5
 const FIT_PAD = 40
 
 // One soft hue per ancestral branch, echoing the familiar four-color fan chart
@@ -29,7 +28,7 @@ const LINEAGE_COLORS = [
 // a0..a1. Angles are math-convention; y is flipped so the fan sweeps the upper
 // half. As θ increases the point moves counter-clockwise on screen, so the outer
 // arc uses sweep-flag 0 and the inner (returning) arc sweep-flag 1.
-function wedgePath(w: AncestorWedge): string {
+function wedgePath(w: Wedge): string {
   const pt = (r: number, a: number) =>
     `${(r * Math.cos(a)).toFixed(2)} ${(-r * Math.sin(a)).toFixed(2)}`
   const large = w.a1 - w.a0 > Math.PI ? 1 : 0
@@ -42,7 +41,7 @@ function wedgePath(w: AncestorWedge): string {
 // Where and how to draw a wedge's label: centered in the wedge and rotated
 // tangent to its ring, which keeps every label upright across the upper fan
 // (horizontal at the top, vertical at the sides).
-function wedgeLabel(w: AncestorWedge) {
+function wedgeLabel(w: Wedge) {
   const mid = (w.a0 + w.a1) / 2
   const rMid = (w.r0 + w.r1) / 2
   return {
@@ -54,13 +53,16 @@ function wedgeLabel(w: AncestorWedge) {
   }
 }
 
-// The ego-centric radial chart: the focus person as a disc at the center,
-// ancestors as a nested wedge fan above (colored by ancestral branch), and
-// descendants fanning down as nodes — with couples' shared children collapsed
-// onto union junctions, so remarriage/adoption/multiple parents (which a fan
-// chart can't express) stay legible. Tap anyone to re-root the chart on them. It
-// shares the pan/zoom + fullscreen chrome with GraphCanvas (which hosts it), so
-// this component owns only the SVG body and its own control column.
+// The ego-centric radial chart: the focus person as a disc at the center, with
+// two nested wedge fans — ancestors above, descendants below — each colored by
+// branch. A married-in co-parent (who isn't a blood relative and so has no
+// wedge) is drawn as a thin rose "spouse band" at the base of that union's
+// children, and step/adoptive links are dashed, so remarriage/adoption/multiple
+// parents stay legible where a plain fan chart can't show them. The focus's
+// siblings and childless partners sit as nodes in the clear horizontal channel
+// between the fans. Tap anyone to re-root the chart on them. It shares the
+// pan/zoom + fullscreen chrome with GraphCanvas (which hosts it), so this
+// component owns only the SVG body and its own control column.
 export default function RadialCanvas({
   nodes,
   edges,
@@ -170,21 +172,25 @@ export default function RadialCanvas({
         aria-label="Radial family chart"
       >
         <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-          {/* Ancestor fan: one filled wedge per ancestor, colored by branch. */}
+          {/* Both fans: ancestors above, descendants below, colored by branch;
+              plus thin rose spouse bands naming a married-in co-parent. */}
           {layout.wedges.map((w) => {
             const n = nodeById.get(w.id)
             if (!n) return null
-            const color =
-              LINEAGE_COLORS[
-                ((w.lineage % LINEAGE_COLORS.length) + LINEAGE_COLORS.length) %
-                  LINEAGE_COLORS.length
-              ]
+            const spouse = w.kind === 'spouse'
             const nonBio = Boolean(w.subtype && w.subtype !== 'biological')
             const selected = w.id === selectedId
             const isMe = meNodeId != null && w.id === meNodeId
+            const color = spouse
+              ? '#fb7185'
+              : LINEAGE_COLORS[
+                  (((w.lineage ?? 0) % LINEAGE_COLORS.length) +
+                    LINEAGE_COLORS.length) %
+                    LINEAGE_COLORS.length
+                ]
             const lbl = wedgeLabel(w)
             const short = shortName(n)
-            const maxChars = Math.max(3, Math.floor(lbl.arc / 6.5))
+            const maxChars = Math.max(2, Math.floor(lbl.arc / (spouse ? 5 : 6.5)))
             const text =
               short.length > maxChars ? `${short.slice(0, maxChars - 1)}…` : short
             const ariaName = n.name || short
@@ -207,12 +213,15 @@ export default function RadialCanvas({
                 <path
                   d={wedgePath(w)}
                   fill={color}
-                  fillOpacity={selected ? 0.55 : 0.28}
-                  // A dashed amber border marks a step/adoptive/foster link.
+                  fillOpacity={
+                    spouse ? (w.ended ? 0.18 : 0.34) : selected ? 0.55 : 0.28
+                  }
+                  // A dashed amber border marks a step/adoptive/foster link; a
+                  // dashed rose band marks a marriage that has ended.
                   stroke={isMe ? '#34d399' : nonBio ? '#fbbf24' : color}
-                  strokeOpacity={isMe || nonBio ? 0.9 : 0.65}
+                  strokeOpacity={isMe || nonBio ? 0.9 : 0.6}
                   strokeWidth={isMe ? 2 : 1}
-                  strokeDasharray={nonBio ? '4 3' : undefined}
+                  strokeDasharray={nonBio || (spouse && w.ended) ? '4 3' : undefined}
                 />
                 <text
                   x={lbl.x}
@@ -220,8 +229,8 @@ export default function RadialCanvas({
                   transform={`rotate(${lbl.rot} ${lbl.x} ${lbl.y})`}
                   textAnchor="middle"
                   dominantBaseline="middle"
-                  fontSize={11}
-                  fill="#f4f4f5"
+                  fontSize={spouse ? 8 : 11}
+                  fill={spouse ? '#fecdd3' : '#f4f4f5'}
                 >
                   {text}
                 </text>
@@ -263,9 +272,6 @@ export default function RadialCanvas({
             )
           })}
 
-          {layout.junctions.map((j) => (
-            <circle key={j.id} cx={j.x} cy={j.y} r={JUNCTION_R} fill="#52525b" />
-          ))}
 
           {layout.nodes.map((rn) => {
             // The focus is drawn as a labelled center disc below, not here.
@@ -322,9 +328,12 @@ export default function RadialCanvas({
                 {linked && !isMe && (
                   <circle cx={NODE_R - 4} cy={-NODE_R + 4} r={3} fill="#34d399" />
                 )}
+                {/* Flankers sit in the horizontal channel, so their labels read
+                    outward to the side rather than dipping into a fan below. */}
                 <text
-                  y={NODE_R + 14}
-                  textAnchor="middle"
+                  x={rn.x < 0 ? -(NODE_R + 5) : NODE_R + 5}
+                  textAnchor={rn.x < 0 ? 'end' : 'start'}
+                  dominantBaseline="middle"
                   fontSize={12}
                   fill={selected ? '#f4f4f5' : '#d4d4d8'}
                 >
