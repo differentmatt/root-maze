@@ -254,6 +254,13 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
               siblings flank the center. Tap anyone to re-root the chart on them.
               Best for large or complex families on a phone.
             </p>
+            <p>
+              <span className="text-zinc-100">Graph</span> — the whole family at
+              once, arranged by a force layout that clusters each couple and
+              their children under a small junction dot. Parents sit above their
+              children with no overlap; good for seeing everyone together on a
+              portrait screen.
+            </p>
           </section>
 
           <section>
@@ -302,7 +309,7 @@ function Legend() {
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-amber-400" />{' '}
-        adopted / step (radial)
+        adopted / step (radial); dashed sky in graph
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-zinc-400" />{' '}

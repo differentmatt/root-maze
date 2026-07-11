@@ -1,19 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PersonNode, Edge } from '../api'
 import { computeLayout, neighborhood, type LayoutEdge } from './layout'
+import {
+  computeForceLayout,
+  type ForceInputEdge,
+  type FamilyNode,
+} from './forceLayout'
 import { usePanZoom, type View } from './panzoom'
 import RadialCanvas from './RadialCanvas'
 import { labelFor } from './names'
 
-// The graph can be viewed three ways. 'tree' lays out the whole family by
+// The graph can be viewed four ways. 'tree' lays out the whole family by
 // generation; 'focus' shows just one person's nearby relatives (same layered
 // engine over a bounded neighborhood), which keeps a large tree legible on a
 // small screen; 'radial' is an ego-centric fan chart (its own engine) that
-// centers on one person and fans ancestors up / descendants down — the shape
-// that fills a portrait phone screen and stays readable for messy families.
-type ViewMode = 'tree' | 'focus' | 'radial'
+// centers on one person and fans ancestors up / descendants down; 'graph' shows
+// the *whole* family at once via a constraint-based force (stress) layout —
+// couples and their children cluster under shared "family" junctions, filling a
+// portrait screen with no overlap where the layered Tree smears into a hairball.
+type ViewMode = 'tree' | 'focus' | 'radial' | 'graph'
 // How many relationship-hops out the focus view reaches from its center.
 const FOCUS_DEPTH = 3
+// Padding around the force-graph content once normalized into layout space.
+const GRAPH_MARGIN = 60
 
 // The SVG's own coordinate viewport. It stays fixed so the on-screen element
 // keeps a stable size; the whole tree is fit into it via the pan/zoom
@@ -123,20 +132,72 @@ export default function GraphCanvas({
     [mode, effectiveFocus, shownNodes, shownEdges],
   )
 
-  const layout = useMemo(
-    () =>
-      computeLayout(
+  // Tree/focus use the layered engine; graph uses the force (stress) engine over
+  // the whole family. Both are normalized to the same contract — `pos` in a
+  // padded box starting near the origin, plus width/height — so all the
+  // fit-to-view math below is shared. Graph mode additionally carries the union
+  // "family" junctions the renderer draws parent→family→child edges through.
+  const layout = useMemo((): {
+    pos: Record<string, { x: number; y: number }>
+    familyNodes: FamilyNode[]
+    width: number
+    height: number
+  } => {
+    if (mode === 'graph') {
+      const raw = computeForceLayout(
         shownNodes.map((n) => n.nodeId),
-        shownEdges.map((e) => ({
-          from: e.fromPerson,
-          to: e.toPerson,
-          kind: e.edgeKind,
-        })),
-      ),
+        shownEdges.map(
+          (e): ForceInputEdge => ({
+            from: e.fromPerson,
+            to: e.toPerson,
+            kind: e.edgeKind,
+          }),
+        ),
+      )
+      // Shift content so its bounding box starts at GRAPH_MARGIN (matching the
+      // layered layout, which the shared fit math assumes).
+      const dx = GRAPH_MARGIN - raw.minX
+      const dy = GRAPH_MARGIN - raw.minY
+      const pos: Record<string, { x: number; y: number }> = {}
+      for (const [id, p] of Object.entries(raw.pos)) {
+        pos[id] = { x: p.x + dx, y: p.y + dy }
+      }
+      const familyNodes = raw.familyNodes.map((f) => ({
+        ...f,
+        x: f.x + dx,
+        y: f.y + dy,
+      }))
+      return {
+        pos,
+        familyNodes,
+        width: raw.width + 2 * GRAPH_MARGIN,
+        height: raw.height + 2 * GRAPH_MARGIN,
+      }
+    }
+    const laid = computeLayout(
+      shownNodes.map((n) => n.nodeId),
+      shownEdges.map((e) => ({
+        from: e.fromPerson,
+        to: e.toPerson,
+        kind: e.edgeKind,
+      })),
+    )
+    return { ...laid, familyNodes: [] }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [layoutKey],
-  )
+  }, [layoutKey])
   const pos = layout.pos
+
+  // Parent→child subtype keyed "from>to", so graph-mode family→child edges can
+  // dash a step/adoptive/foster link (the junction hides the individual edge).
+  const pcSubtype = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const e of edges) {
+      if (e.edgeKind === 'parent_child') {
+        m.set(`${e.fromPerson}>${e.toPerson}`, e.subtype)
+      }
+    }
+    return m
+  }, [edges])
 
   // The scale that fits the whole current layout, allowed below the interactive
   // floor (down to ABS_MIN_K) so even a very wide/tall tree fits fully.
@@ -328,7 +389,52 @@ export default function GraphCanvas({
         </defs>
 
         <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
+          {/* Graph mode routes parent→child through union "family" junctions:
+              a small dot per couple/co-parent-set, with quadratic-curve edges
+              elbowing parent→family and family→child (sky, dashed for
+              step/adoptive), which keeps siblings clustered and edges sparse.
+              Partner edges still render as direct rose links below. */}
+          {mode === 'graph' &&
+            layout.familyNodes.map((f) => (
+              <g key={f.id}>
+                {f.parents.map((pid) => {
+                  const a = pos[pid]
+                  if (!a) return null
+                  return (
+                    <path
+                      key={`${f.id}<${pid}`}
+                      d={`M ${a.x} ${a.y} Q ${a.x} ${f.y} ${f.x} ${f.y}`}
+                      fill="none"
+                      stroke="#38bdf8"
+                      strokeWidth={1.75}
+                    />
+                  )
+                })}
+                {f.children.map((cid) => {
+                  const b = pos[cid]
+                  if (!b) return null
+                  const nonBio = f.parents.some((pid) => {
+                    const s = pcSubtype.get(`${pid}>${cid}`)
+                    return s && s !== 'biological'
+                  })
+                  return (
+                    <path
+                      key={`${f.id}>${cid}`}
+                      d={`M ${f.x} ${f.y} Q ${f.x} ${b.y} ${b.x} ${b.y}`}
+                      fill="none"
+                      stroke="#38bdf8"
+                      strokeWidth={1.75}
+                      strokeDasharray={nonBio ? '5 4' : undefined}
+                    />
+                  )
+                })}
+                <circle cx={f.x} cy={f.y} r={4} fill="#52525b" />
+              </g>
+            ))}
+
           {shownEdges.map((e) => {
+            // In graph mode, parent→child is drawn via the family junctions above.
+            if (mode === 'graph' && e.edgeKind !== 'partner') return null
             const a = pos[e.fromPerson]
             const b = pos[e.toPerson]
             if (!a || !b) return null
@@ -456,6 +562,9 @@ export default function GraphCanvas({
         </ModeButton>
         <ModeButton active={mode === 'radial'} onClick={enterRadial}>
           Radial
+        </ModeButton>
+        <ModeButton active={mode === 'graph'} onClick={() => setMode('graph')}>
+          Graph
         </ModeButton>
       </div>
     </div>
