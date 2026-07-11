@@ -1,4 +1,4 @@
-import { getItem, putItem, queryPrefix } from './dynamo.js'
+import { getItem, putItem, queryPrefix, queryAll } from './dynamo.js'
 import { newNodeId } from './ids.js'
 import { appendLog } from './groups.js'
 import { ValidationError } from './errors.js'
@@ -86,7 +86,7 @@ function applyWritable(target, input) {
 }
 
 export async function listNodes(groupId) {
-  const items = await queryPrefix(`GROUP#${groupId}`, 'NODE#')
+  const items = await queryAll(`GROUP#${groupId}`, 'NODE#')
   return items.filter((i) => !i.deletedAt).map(toNode)
 }
 

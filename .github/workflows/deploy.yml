@@ -95,6 +95,7 @@ jobs:
           echo "members_fn=$(get MembersFunctionName)" >> "$GITHUB_OUTPUT"
           echo "invites_fn=$(get InvitesFunctionName)" >> "$GITHUB_OUTPUT"
           echo "links_fn=$(get LinksFunctionName)"   >> "$GITHUB_OUTPUT"
+          echo "gedcom_fn=$(get GedcomFunctionName)" >> "$GITHUB_OUTPUT"
 
       # --- Frontend build + upload ---
       - name: Build frontend
@@ -129,7 +130,8 @@ jobs:
             ${{ steps.out.outputs.edges_fn }} \
             ${{ steps.out.outputs.members_fn }} \
             ${{ steps.out.outputs.invites_fn }} \
-            ${{ steps.out.outputs.links_fn }}; do
+            ${{ steps.out.outputs.links_fn }} \
+            ${{ steps.out.outputs.gedcom_fn }}; do
             aws lambda update-function-code \
               --function-name "$FN" \
               --zip-file fileb://backend.zip >/dev/null

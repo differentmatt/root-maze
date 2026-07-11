@@ -321,3 +321,126 @@ export function unlinkPersonNode(
 ): Promise<{ accountId: string; nodeId: string; unlinked: boolean }> {
   return request('DELETE', `/groups/${groupId}/members/${accountId}/link`)
 }
+
+// --- GEDCOM import / export ---
+//
+// Import is two-phase: previewImport diffs a file against the tree (no writes),
+// then commitImport applies the caller's per-person resolutions. The client
+// re-sends the same GEDCOM text on commit, so nothing is staged server-side.
+
+// The fields we carry from a GEDCOM individual onto a person.
+export interface ImportedFields {
+  firstName: string | null
+  middleName: string | null
+  lastName: string | null
+  birthdate: string | null
+  deathdate: string | null
+  notes: string | null
+}
+
+// Per-field comparison of an imported person against a candidate node:
+//   fill     — tree is empty, import can supply it (applied by default)
+//   conflict — both differ; the user chooses whether to overwrite
+//   same     — identical (shown for context)
+//   treeOnly — tree has a value the import lacks (never overwritten)
+export type FieldDiffStatus = 'same' | 'fill' | 'conflict' | 'treeOnly'
+
+export interface FieldDiff {
+  field: keyof ImportedFields
+  status: FieldDiffStatus
+  existing: string | null
+  imported: string | null
+}
+
+// A ranked existing-person candidate for an imported record.
+export interface MatchCandidate {
+  nodeId: string
+  name: string
+  fields: ImportedFields
+  score: number
+  tier: 'strong' | 'possible'
+  reasons: string[]
+  // The node's updatedAt at preview time, echoed back on merge so the server
+  // can reject a stale merge.
+  updatedAt: string
+  fieldDiffs: FieldDiff[]
+}
+
+// A relationship the imported person brings, named by the other endpoint.
+// `isNew` is false when both endpoints already exist and are connected in the
+// tree — so a repeat import shows nothing new.
+export interface ImportRelationship {
+  relation: 'partner' | 'parent' | 'child'
+  otherName: string
+  isNew: boolean
+}
+
+export interface ImportPerson {
+  xref: string
+  fullName: string
+  fields: ImportedFields
+  candidates: MatchCandidate[]
+  // The default merge target for a strong, unambiguous match, or null.
+  suggestedNodeId: string | null
+  relationships: ImportRelationship[]
+  // A suggested match whose fields and relationships are all already present —
+  // nothing to review. The UI collapses these on a repeat import.
+  alreadyInTree: boolean
+}
+
+export interface ImportPreview {
+  treeName: string | null
+  stats: {
+    people: number
+    relationships: number
+    strongMatches: number
+    possibleMatches: number
+    newPeople: number
+    alreadyInTree: number
+  }
+  people: ImportPerson[]
+}
+
+// How to handle one imported person on commit, keyed by GEDCOM xref. On merge,
+// `fields` lists which imported fields to write onto the existing node.
+export type ImportResolution =
+  | { action: 'create' }
+  | { action: 'skip' }
+  | { action: 'merge'; nodeId: string; fields: string[]; updatedAt: string }
+
+export interface ImportSummary {
+  created: number
+  merged: number
+  skipped: number
+  relationshipsCreated: number
+  relationshipsSkipped: number
+}
+
+export function previewImport(
+  groupId: string,
+  gedcom: string,
+): Promise<ImportPreview> {
+  return request<ImportPreview>('POST', `/groups/${groupId}/import/preview`, {
+    gedcom,
+  })
+}
+
+export function commitImport(
+  groupId: string,
+  gedcom: string,
+  resolutions: Record<string, ImportResolution>,
+): Promise<ImportSummary> {
+  return request<ImportSummary>('POST', `/groups/${groupId}/import/commit`, {
+    gedcom,
+    resolutions,
+  })
+}
+
+export function exportGedcom(
+  groupId: string,
+): Promise<{ gedcom: string; filename: string }> {
+  return request<{ gedcom: string; filename: string }>(
+    'GET',
+    `/groups/${groupId}/export`,
+  )
+}

@@ -32,7 +32,7 @@ manage membership and invites — deliberately low-friction for a casual family
 app. Every write keeps soft-delete, `updatedAt`/`updatedBy`, and the append-only
 edit log.
 
-**Phase 3 (current): identity linking.** Connect a signed-in account to a person
+**Phase 3 (done): identity linking.** Connect a signed-in account to a person
 in the tree. The link lives on `person_node.accountId` — a member claims a node
 as themselves ("This is me"), and the members + tree UI surface who's who (the
 caller's own node gets an emerald ring; claimed nodes get a dot). Integrity is
@@ -47,6 +47,34 @@ optionally offers a "which person are you?" link-on-join step (skippable). Also
 adds the "New group" affordance — create a second group you own from the
 workspace (the backend already allowed it). Every link/unlink preserves
 soft-delete, `updatedAt`/`updatedBy`, and appends `link`/`unlink` edit-log rows.
+
+**Phase 4 (current): GEDCOM import/export.** Bring a family tree in from (or send
+it out to) any genealogy tool via GEDCOM 5.5.1 (`INDI`/`FAM` core). Any member
+may import/export. Parsing + mapping + serialization are pure in
+`lib/gedcom.js`; person matching is a pure weighted-scoring model in
+`lib/gedcom-match.js` (name via exact/nickname/typo/initial, birth/death by
+exact-or-year with a conflicting-year penalty, tiered strong/possible); the
+DynamoDB-facing matching/writing is in `lib/gedcom-import.js`.
+Our model is narrower than GEDCOM, so `SEX` and birth/death `PLAC` are folded
+into `notes` with a `Label: value` convention that export reads back to rebuild
+the tags (a deliberately lossy-but-legible round trip). Import is **two-phase**:
+`POST .../import/preview` diffs a file against the tree (no writes) and, per
+imported person, returns ranked match **candidates** — scored on name + dates and
+then boosted when they share a relative already in the tree (a two-pass
+structural signal) — each with a per-field diff (`same`/`fill`/`conflict`/
+`treeOnly`) and the relationships the person brings; `POST .../import/commit`
+applies the caller's per-person resolutions (`create`/`merge` into a chosen
+candidate with chosen `fields`/`skip`, keyed by GEDCOM xref). Import is
+idempotent: re-importing the same file matches everyone, writes nothing new, and
+dedupes edges, so the review flags each person `alreadyInTree` (no field/relationship
+delta) and the UI collapses those, surfacing only what's actually missing.
+then wires relationships via `createEdge` (reusing its referential-integrity +
+one-relationship-per-pair rules; a duplicate/self-loop is skipped, not fatal).
+The client re-sends the same GEDCOM text on commit, so nothing is staged
+server-side. Export (`GET .../export`) serializes the whole group, reconstructing
+`FAM` records from our pairwise edges. "New group from a file" is just create +
+commit into the empty group (every person is new, so no review). Every write
+keeps soft-delete, `updatedAt`/`updatedBy`, and the edit log.
 
 ## Commands
 
@@ -112,6 +140,11 @@ Phase 3 identity-linking routes (backed by the `links` handler):
 `{ nodeId }`). The members list (`GET .../members`) is enriched with each
 member's `linkedNodeId`/`linkedNodeName`.
 
+Phase 4 GEDCOM routes (backed by the `gedcom` handler; any member):
+`POST /api/groups/{groupId}/import/preview` (body `{ gedcom }` → diff),
+`POST /api/groups/{groupId}/import/commit` (body `{ gedcom, resolutions }`),
+`GET /api/groups/{groupId}/export` (→ `{ gedcom, filename }`).
+
 ## Key files
 
 - `src/App.tsx` — sign-in → group state → Group/Tree workspace (Group tab first:
@@ -120,15 +153,19 @@ member's `linkedNodeId`/`linkedNodeName`.
   `siblings` + `suggestions` (derived relationships, incl. likely other parent)
 - `src/members/` — `MembersPanel` (members + invite links + who's-who linking),
   `JoinScreen` (accept + optional link-on-join)
+- `src/gedcom/` — `ImportExport` (Group-tab panel: export download, import →
+  preview → review conflicts → commit, and new-group-from-file)
 - `src/components/PersonPicker` — searchable person combobox (replaces long
   `<select>` lists in the tree + members UIs)
 - `src/auth.ts`, `src/api.ts` — client auth state + fetch wrapper
 - `backend/lib/` — `auth`, `dynamo`, `accounts`, `groups` (incl. membership
   management), `invites`, `links` (identity linking), `nodes`, `edges`, `graph`,
+  `gedcom` (pure parse/map/serialize), `gedcom-match` (pure person-scoring),
+  `gedcom-import` (preview/commit),
   `http` (auth+membership gate; returns the caller's membership row), `ids`,
   `errors`, `response`
 - `backend/handlers/` — `me`, `groups`, `graph`, `nodes`, `edges`, `members`,
-  `invites`, `links`
+  `invites`, `links`, `gedcom`
 - `infra/template.yaml` — one CloudFormation template, two stacks
 - `scripts/setup.sh` — one-time bootstrap (run in AWS CloudShell)
 - `.github/workflows/deploy.yml` — branch-routed deploy

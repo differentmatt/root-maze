@@ -16,6 +16,7 @@ import {
 } from './api'
 import TreeView from './tree/TreeView'
 import MembersPanel from './members/MembersPanel'
+import ImportExport from './gedcom/ImportExport'
 import JoinScreen from './members/JoinScreen'
 import { APP_TITLE } from './appTitle'
 
@@ -275,6 +276,10 @@ function GroupPanel({
       <div className="border-t border-zinc-800" />
 
       <MembersPanel key={active.groupId} group={active} />
+
+      <div className="border-t border-zinc-800" />
+
+      <ImportExport key={`ie-${active.groupId}`} group={active} onCreated={onCreated} />
     </div>
   )
 }

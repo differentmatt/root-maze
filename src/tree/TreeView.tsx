@@ -322,9 +322,12 @@ const primaryBtn =
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
-// Native date picker for the common case, with a graceful fallback to a text
-// field for legacy or approximate values (e.g. a year only) so we never drop
-// data the picker can't represent.
+// Birth/death dates are stored free-form, so they can hold anything GEDCOM does
+// — a full date, a year, or an approximate value like "ABT 1850". The editable
+// field is therefore a plain text box (it clears reliably and accepts a year or
+// an approximate date, which a native date input can't). A calendar button
+// summons the native date picker for the common exact-date case, writing the
+// chosen ISO date back into the text field.
 function DateField({
   value,
   onChange,
@@ -334,15 +337,34 @@ function DateField({
   onChange: (v: string) => void
   placeholder: string
 }) {
-  const type = value === '' || ISO_DATE.test(value) ? 'date' : 'text'
   return (
-    <input
-      type={type}
-      className={inputClass}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-    />
+    <div className="relative">
+      <input
+        type="text"
+        className={`${inputClass} pr-10`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+      {/* A transparent native date input overlaid on the calendar icon. Tapping
+          the icon actually taps this input, so the native picker opens directly
+          (reliable on mobile, no showPicker needed); picking a date writes its
+          ISO value into the free-form text field. Seeded from the current value
+          only when it's a full ISO date the picker can represent. */}
+      <span className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center">
+        <span aria-hidden className="pointer-events-none text-zinc-400">
+          📅
+        </span>
+        <input
+          type="date"
+          aria-label="Pick a date"
+          className="absolute inset-0 cursor-pointer opacity-0"
+          value={ISO_DATE.test(value) ? value : ''}
+          onChange={(e) => e.target.value && onChange(e.target.value)}
+          onClick={(e) => e.currentTarget.showPicker?.()}
+        />
+      </span>
+    </div>
   )
 }
 
@@ -505,7 +527,7 @@ function AddPersonForm({
         <DateField
           value={birthdate}
           onChange={setBirthdate}
-          placeholder="Birthdate"
+          placeholder="e.g. 1979 or 1979-05-01"
         />
       </Field>
       {error && <p className="text-sm text-red-400">{error}</p>}
@@ -790,10 +812,10 @@ function PersonPanel({
         </button>
       )}
       <Field label="Birthdate">
-        <DateField value={birthdate} onChange={setBirthdate} placeholder="Birthdate" />
+        <DateField value={birthdate} onChange={setBirthdate} placeholder="e.g. 1979 or 1979-05-01" />
       </Field>
       <Field label="Death date">
-        <DateField value={deathdate} onChange={setDeathdate} placeholder="Death date" />
+        <DateField value={deathdate} onChange={setDeathdate} placeholder="e.g. 1966 or 1966-03-20" />
       </Field>
       <Field label="Notes">
         <textarea
@@ -987,11 +1009,19 @@ function DeleteSection({
   person: PersonNode
   onDeleted: () => void
 }) {
-  const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function remove() {
+    // A person delete cascades to their relationships and can't be undone, so
+    // gate it behind an explicit confirmation dialog.
+    if (
+      !window.confirm(
+        `Delete ${person.name}? This also removes their relationships and can’t be undone.`,
+      )
+    ) {
+      return
+    }
     setBusy(true)
     setError(null)
     try {
@@ -1006,38 +1036,14 @@ function DeleteSection({
 
   return (
     <div className="border-t border-zinc-800 pt-3">
-      {!confirming ? (
-        <button
-          onClick={() => setConfirming(true)}
-          className="text-sm text-red-400 hover:text-red-300"
-        >
-          Delete person
-        </button>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-zinc-300">
-            Delete {person.name}? This also removes their relationships and can’t
-            be undone.
-          </p>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          <div className="flex gap-2">
-            <button
-              onClick={remove}
-              disabled={busy}
-              className="rounded-md bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-40"
-            >
-              {busy ? 'Deleting…' : 'Delete'}
-            </button>
-            <button
-              onClick={() => setConfirming(false)}
-              disabled={busy}
-              className="rounded-md border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+      <button
+        onClick={remove}
+        disabled={busy}
+        className="text-sm text-red-400 hover:text-red-300 disabled:opacity-40"
+      >
+        {busy ? 'Deleting…' : 'Delete person'}
+      </button>
+      {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
     </div>
   )
 }
