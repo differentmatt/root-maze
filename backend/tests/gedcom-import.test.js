@@ -124,6 +124,32 @@ describe('previewImport', () => {
     expect(ada.match).toBeNull()
   })
 
+  it('matches across a middle-name gap and a year-vs-full-date difference', async () => {
+    // The real report: existing "Matt McCabe Lott" (born 1979-05-01) should be
+    // recognised when importing "Matt Lott" (born 1979) — the middle name and
+    // date precision differ but it's the same person.
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      {
+        nodeId: 'nod_matt',
+        firstName: 'Matt',
+        middleName: 'McCabe',
+        lastName: 'Lott',
+        birthdate: '1979-05-01',
+        deathdate: null,
+        notes: null,
+        updatedAt: 't',
+      },
+    ])
+    const ged = '0 HEAD\n0 @I1@ INDI\n1 NAME Matt /Lott/\n1 BIRT\n2 DATE 1979\n0 TRLR'
+    const preview = await previewImport('g1', ged)
+    const matt = preview.people.find((p) => p.fullName === 'Matt Lott')
+    expect(matt.match).not.toBeNull()
+    expect(matt.match.nodeId).toBe('nod_matt')
+    // The differing birthdate precision is surfaced as a conflict to resolve,
+    // not silently overwritten; the existing middle name is left intact.
+    expect(matt.match.conflicts.some((c) => c.field === 'birthdate')).toBe(true)
+  })
+
   it('does not suggest the same existing node to two different imported people', async () => {
     // Two imported people with the same name; only one existing node.
     const gedTwins = `0 HEAD\n0 @I1@ INDI\n1 NAME Ada /King/\n0 @I2@ INDI\n1 NAME Ada /King/\n0 TRLR`

@@ -24,23 +24,52 @@ const FIELDS = ['firstName', 'middleName', 'lastName', 'birthdate', 'deathdate',
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
 const isEmpty = (v) => v === null || v === undefined || String(v).trim() === ''
 
-// Derived full name of an imported person, for display + match keying.
+// Derived full name of an imported person, for display.
 function importedFullName(p) {
   return [p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ')
 }
 
+// Duplicate detection keys on first + last name only, deliberately ignoring the
+// middle name: the same person is routinely recorded as "Matt Lott" in one tree
+// and "Matt McCabe Lott" in another, and we don't want that to hide the match.
+// (A middle-name difference surfaces later as a reviewable field, not a miss.)
+function nameKey(firstName, lastName) {
+  return norm([firstName, lastName].filter(Boolean).join(' '))
+}
+
+// The four-digit year inside a free-form date string ("1979", "1979-05-01",
+// "ABT 1979", "10 DEC 1815"), or null if there isn't one.
+function yearOf(date) {
+  const m = String(date || '').match(/\d{4}/)
+  return m ? m[0] : null
+}
+
+// Whether two free-form birthdates could belong to the same person. An unknown
+// date is compatible with anything; otherwise we compare by year, so "1979" and
+// "1979-05-01" (a year vs a full date, a common precision mismatch between
+// tools) count as the same while "1979" and "1990" do not.
+function datesCompatible(a, b) {
+  if (isEmpty(a) || isEmpty(b)) return true
+  const ya = yearOf(a)
+  const yb = yearOf(b)
+  if (ya && yb) return ya === yb
+  return norm(a) === norm(b)
+}
+
 // Pick the best existing node an imported person could be, from the nodes that
-// share a (normalized) full name. A shared birthdate is the tiebreaker; with no
-// birthdate to go on we fall back to the first same-name node.
+// share a first+last name. Prefer an exact birthdate, then a year-compatible
+// one; a same-name node whose birthdate names a *different* year is treated as a
+// different individual (no suggestion) rather than a risky guess.
 function chooseMatch(imported, candidates) {
   if (!candidates || !candidates.length) return null
   if (!isEmpty(imported.birthdate)) {
     const exact = candidates.find((c) => norm(c.birthdate) === norm(imported.birthdate))
     if (exact) return exact
-    // A same-name person with a *different* stated birthdate is more likely a
-    // different individual than a match, so don't suggest one.
-    const someKnown = candidates.some((c) => !isEmpty(c.birthdate))
-    if (someKnown) return null
+    const compatible = candidates.find((c) => datesCompatible(imported.birthdate, c.birthdate))
+    if (compatible) return compatible
+    // Every same-name candidate states a different year → likely not the same
+    // person, so don't suggest one.
+    return null
   }
   return candidates[0]
 }
@@ -76,7 +105,7 @@ export async function previewImport(groupId, gedcomText) {
   const existing = await listNodes(groupId)
   const byName = new Map()
   for (const node of existing) {
-    const key = norm(nodeFullName(node))
+    const key = nameKey(node.firstName, node.lastName)
     if (!byName.has(key)) byName.set(key, [])
     byName.get(key).push(node)
   }
@@ -88,7 +117,7 @@ export async function previewImport(groupId, gedcomText) {
   const claimedNodes = new Set()
   const preview = people.map((p) => {
     // Only offer candidates that haven't been claimed by an earlier record.
-    const candidates = (byName.get(norm(importedFullName(p))) || []).filter(
+    const candidates = (byName.get(nameKey(p.firstName, p.lastName)) || []).filter(
       (c) => !claimedNodes.has(c.nodeId),
     )
     const match = chooseMatch(p, candidates)
