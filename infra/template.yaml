@@ -295,6 +295,28 @@ Resources:
         ZipFile: |
           exports.handler = async () => ({ statusCode: 503, body: '{"error":"Not deployed yet"}' });
 
+  # GEDCOM import/export shares the backend bundle; one entrypoint
+  # (handlers/gedcom.handler) backs preview, commit, and export. Import can
+  # parse a whole family file, so its timeout is a touch higher than the others.
+  GedcomFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-gedcom'
+      Runtime: nodejs20.x
+      Architectures: [arm64]
+      Handler: handlers/gedcom.handler
+      MemorySize: 512
+      Timeout: 30
+      ReservedConcurrentExecutions: 10
+      Role: !GetAtt ApiLambdaRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref DataTable
+          GOOGLE_CLIENT_ID: !Ref GoogleClientId
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({ statusCode: 503, body: '{"error":"Not deployed yet"}' });
+
   # --- API Gateway v2 (HTTP API) ---
   Api:
     Type: AWS::ApiGatewayV2::Api
@@ -374,6 +396,14 @@ Resources:
       ApiId: !Ref Api
       IntegrationType: AWS_PROXY
       IntegrationUri: !GetAtt LinksFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  GedcomIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Api
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GedcomFunction.Arn
       PayloadFormatVersion: '2.0'
 
   MeGetRoute:
@@ -507,6 +537,28 @@ Resources:
       RouteKey: 'DELETE /api/groups/{groupId}/members/{accountId}/link'
       Target: !Sub 'integrations/${LinksIntegration}'
 
+  # GEDCOM import/export routes (any member; gated inside the handler).
+  GedcomExportRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'GET /api/groups/{groupId}/export'
+      Target: !Sub 'integrations/${GedcomIntegration}'
+
+  GedcomImportPreviewRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'POST /api/groups/{groupId}/import/preview'
+      Target: !Sub 'integrations/${GedcomIntegration}'
+
+  GedcomImportCommitRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Api
+      RouteKey: 'POST /api/groups/{groupId}/import/commit'
+      Target: !Sub 'integrations/${GedcomIntegration}'
+
   # Token-addressed invite routes. The preview (GET) is intentionally public —
   # an invitee sees only the group name before signing in to accept.
   InvitePreviewRoute:
@@ -583,6 +635,14 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref LinksFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
+
+  GedcomFunctionApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GedcomFunction
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
@@ -760,5 +820,7 @@ Outputs:
     Value: !Ref InvitesFunction
   LinksFunctionName:
     Value: !Ref LinksFunction
+  GedcomFunctionName:
+    Value: !Ref GedcomFunction
   DeployRoleArn:
     Value: !GetAtt DeployRole.Arn

@@ -321,3 +321,95 @@ export function unlinkPersonNode(
 ): Promise<{ accountId: string; nodeId: string; unlinked: boolean }> {
   return request('DELETE', `/groups/${groupId}/members/${accountId}/link`)
 }
+
+// --- GEDCOM import / export ---
+//
+// Import is two-phase: previewImport diffs a file against the tree (no writes),
+// then commitImport applies the caller's per-person resolutions. The client
+// re-sends the same GEDCOM text on commit, so nothing is staged server-side.
+
+// The fields we carry from a GEDCOM individual onto a person.
+export interface ImportedFields {
+  firstName: string | null
+  middleName: string | null
+  lastName: string | null
+  birthdate: string | null
+  deathdate: string | null
+  notes: string | null
+}
+
+// A field the tree is missing that the import can supply (applied on merge).
+export interface ImportFill {
+  field: keyof ImportedFields
+  imported: string
+}
+
+// A field where the tree and the file disagree — the caller picks a winner.
+export interface ImportConflict {
+  field: keyof ImportedFields
+  existing: string
+  imported: string
+}
+
+export interface ImportMatch {
+  nodeId: string
+  name: string
+  fills: ImportFill[]
+  conflicts: ImportConflict[]
+}
+
+export interface ImportPerson {
+  xref: string
+  fullName: string
+  fields: ImportedFields
+  match: ImportMatch | null
+}
+
+export interface ImportPreview {
+  treeName: string | null
+  stats: { people: number; relationships: number; matches: number; newPeople: number }
+  people: ImportPerson[]
+}
+
+// How to handle one imported person on commit, keyed by GEDCOM xref.
+export type ImportResolution =
+  | { action: 'create' }
+  | { action: 'skip' }
+  | { action: 'merge'; nodeId: string; overwrite: string[] }
+
+export interface ImportSummary {
+  created: number
+  merged: number
+  skipped: number
+  relationshipsCreated: number
+  relationshipsSkipped: number
+}
+
+export function previewImport(
+  groupId: string,
+  gedcom: string,
+): Promise<ImportPreview> {
+  return request<ImportPreview>('POST', `/groups/${groupId}/import/preview`, {
+    gedcom,
+  })
+}
+
+export function commitImport(
+  groupId: string,
+  gedcom: string,
+  resolutions: Record<string, ImportResolution>,
+): Promise<ImportSummary> {
+  return request<ImportSummary>('POST', `/groups/${groupId}/import/commit`, {
+    gedcom,
+    resolutions,
+  })
+}
+
+export function exportGedcom(
+  groupId: string,
+): Promise<{ gedcom: string; filename: string }> {
+  return request<{ gedcom: string; filename: string }>(
+    'GET',
+    `/groups/${groupId}/export`,
+  )
+}
