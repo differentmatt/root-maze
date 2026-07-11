@@ -367,9 +367,12 @@ export interface MatchCandidate {
 }
 
 // A relationship the imported person brings, named by the other endpoint.
+// `isNew` is false when both endpoints already exist and are connected in the
+// tree — so a repeat import shows nothing new.
 export interface ImportRelationship {
   relation: 'partner' | 'parent' | 'child'
   otherName: string
+  isNew: boolean
 }
 
 export interface ImportPerson {
@@ -380,6 +383,9 @@ export interface ImportPerson {
   // The default merge target for a strong, unambiguous match, or null.
   suggestedNodeId: string | null
   relationships: ImportRelationship[]
+  // A suggested match whose fields and relationships are all already present —
+  // nothing to review. The UI collapses these on a repeat import.
+  alreadyInTree: boolean
 }
 
 export interface ImportPreview {
@@ -390,6 +396,7 @@ export interface ImportPreview {
     strongMatches: number
     possibleMatches: number
     newPeople: number
+    alreadyInTree: number
   }
   people: ImportPerson[]
 }

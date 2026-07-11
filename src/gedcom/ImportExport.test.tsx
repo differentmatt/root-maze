@@ -37,7 +37,7 @@ const commitOk = {
 // plus one brand-new person.
 const preview = {
   treeName: 'Imported',
-  stats: { people: 2, relationships: 1, strongMatches: 1, possibleMatches: 0, newPeople: 1 },
+  stats: { people: 2, relationships: 1, strongMatches: 1, possibleMatches: 0, newPeople: 1, alreadyInTree: 0 },
   people: [
     {
       xref: '@I1@',
@@ -60,7 +60,8 @@ const preview = {
           ],
         },
       ],
-      relationships: [{ relation: 'partner' as const, otherName: 'Maryann Vellanikaran' }],
+      relationships: [{ relation: 'partner' as const, otherName: 'Maryann Vellanikaran', isNew: true }],
+      alreadyInTree: false,
     },
     {
       xref: '@I2@',
@@ -69,6 +70,7 @@ const preview = {
       suggestedNodeId: null,
       candidates: [],
       relationships: [],
+      alreadyInTree: false,
     },
   ],
 }
@@ -76,7 +78,7 @@ const preview = {
 // The multi-candidate ambiguous case.
 const twoCandidatePreview = {
   treeName: null,
-  stats: { people: 1, relationships: 0, strongMatches: 0, possibleMatches: 1, newPeople: 0 },
+  stats: { people: 1, relationships: 0, strongMatches: 0, possibleMatches: 1, newPeople: 0, alreadyInTree: 0 },
   people: [
     {
       xref: '@I1@',
@@ -98,6 +100,38 @@ const twoCandidatePreview = {
         },
       ],
       relationships: [],
+      alreadyInTree: false,
+    },
+  ],
+}
+
+// A repeat import: one person already fully in the tree, one with a new
+// relationship to add.
+const reimportPreview = {
+  treeName: null,
+  stats: { people: 2, relationships: 1, strongMatches: 2, possibleMatches: 0, newPeople: 0, alreadyInTree: 1 },
+  people: [
+    {
+      xref: '@I1@',
+      fullName: 'Ada King',
+      fields: { firstName: 'Ada', middleName: null, lastName: 'King', birthdate: null, deathdate: null, notes: null },
+      suggestedNodeId: 'nod_ada',
+      candidates: [
+        { nodeId: 'nod_ada', name: 'Ada King', fields: { firstName: 'Ada', middleName: null, lastName: 'King', birthdate: null, deathdate: null, notes: null }, score: 8, tier: 'strong' as const, reasons: ['same surname', 'same first name'], updatedAt: 't-ada', fieldDiffs: [] },
+      ],
+      relationships: [{ relation: 'partner' as const, otherName: 'William King', isNew: false }],
+      alreadyInTree: true,
+    },
+    {
+      xref: '@I2@',
+      fullName: 'William King',
+      fields: { firstName: 'William', middleName: null, lastName: 'King', birthdate: null, deathdate: null, notes: null },
+      suggestedNodeId: 'nod_will',
+      candidates: [
+        { nodeId: 'nod_will', name: 'William King', fields: { firstName: 'William', middleName: null, lastName: 'King', birthdate: null, deathdate: null, notes: null }, score: 8, tier: 'strong' as const, reasons: ['same surname', 'same first name'], updatedAt: 't-will', fieldDiffs: [] },
+      ],
+      relationships: [{ relation: 'partner' as const, otherName: 'Ada King', isNew: true }],
+      alreadyInTree: false,
     },
   ],
 }
@@ -223,5 +257,31 @@ describe('ImportExport review flow', () => {
 
     const res = vi.mocked(commitImport).mock.calls[0][2]['@I1@']
     expect(res).toEqual({ action: 'merge', nodeId: 'nod_b', updatedAt: 't-b', fields: [] })
+  })
+
+  it('re-import: collapses already-present people but still resolves them', async () => {
+    vi.mocked(previewImport).mockResolvedValue(reimportPreview)
+    vi.mocked(commitImport).mockResolvedValue(commitOk)
+
+    render(<ImportExport group={group} onCreated={vi.fn()} />)
+    pickFile(/Import GEDCOM into this group/, '0 HEAD')
+    await screen.findByText('Review import')
+
+    // Only the person with a new relationship shows a card; the settled one is
+    // hidden behind a toggle.
+    expect(screen.getByText(/^William King/)).toBeInTheDocument()
+    expect(screen.queryByText(/^Ada King ·/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /1 already in your tree/ })).toBeInTheDocument()
+    // The new relationship William brings is surfaced.
+    expect(screen.getByText(/Adds: partner Ada King/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+    await waitFor(() => expect(commitImport).toHaveBeenCalled())
+
+    // Both people are still resolved (merged into their nodes) so relationships
+    // wire up — the collapsed one isn't dropped.
+    const resolutions = vi.mocked(commitImport).mock.calls[0][2]
+    expect(resolutions['@I1@']).toMatchObject({ action: 'merge', nodeId: 'nod_ada' })
+    expect(resolutions['@I2@']).toMatchObject({ action: 'merge', nodeId: 'nod_will' })
   })
 })

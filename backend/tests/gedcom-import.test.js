@@ -79,15 +79,51 @@ describe('previewImport', () => {
       strongMatches: 0,
       possibleMatches: 0,
       newPeople: 2,
+      alreadyInTree: 0,
     })
     expect(preview.people.every((p) => p.candidates.length === 0)).toBe(true)
     expect(preview.people.every((p) => p.suggestedNodeId === null)).toBe(true)
   })
 
-  it('surfaces relationships each imported person brings', async () => {
+  it('surfaces relationships each imported person brings (new into an empty group)', async () => {
     const preview = await previewImport('g1', GED)
     const ada = findPerson(preview, 'Ada King')
-    expect(ada.relationships).toContainEqual({ relation: 'partner', otherName: 'William King' })
+    expect(ada.relationships).toContainEqual({
+      relation: 'partner',
+      otherName: 'William King',
+      isNew: true,
+    })
+  })
+
+  it('marks a re-imported, fully-present person as alreadyInTree', async () => {
+    // The tree already holds Ada and William, partnered — importing the same
+    // file again should have nothing to add for either of them.
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      node({ nodeId: 'nod_ada', firstName: 'Ada', lastName: 'King', birthdate: '1815' }),
+      node({ nodeId: 'nod_will', firstName: 'William', lastName: 'King' }),
+    ])
+    vi.mocked(listEdges).mockResolvedValueOnce([
+      { edgeKind: 'partner', fromPerson: 'nod_ada', toPerson: 'nod_will', subtype: 'partner' },
+    ])
+    const preview = await previewImport('g1', GED)
+    const ada = findPerson(preview, 'Ada King')
+    expect(ada.alreadyInTree).toBe(true)
+    expect(ada.relationships).toContainEqual({ relation: 'partner', otherName: 'William King', isNew: false })
+    expect(preview.stats.alreadyInTree).toBe(2)
+  })
+
+  it('does NOT mark alreadyInTree when the file adds a new relationship', async () => {
+    // Ada and William both already exist but are NOT yet connected; the file's
+    // partner edge is new, so Ada has something to add.
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      node({ nodeId: 'nod_ada', firstName: 'Ada', lastName: 'King', birthdate: '1815' }),
+      node({ nodeId: 'nod_will', firstName: 'William', lastName: 'King' }),
+    ])
+    vi.mocked(listEdges).mockResolvedValueOnce([]) // no existing edges
+    const preview = await previewImport('g1', GED)
+    const ada = findPerson(preview, 'Ada King')
+    expect(ada.alreadyInTree).toBe(false)
+    expect(ada.relationships).toContainEqual({ relation: 'partner', otherName: 'William King', isNew: true })
   })
 
   it('suggests a strong match and diffs fields (same vs tree-only)', async () => {

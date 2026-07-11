@@ -64,7 +64,10 @@ then boosted when they share a relative already in the tree (a two-pass
 structural signal) — each with a per-field diff (`same`/`fill`/`conflict`/
 `treeOnly`) and the relationships the person brings; `POST .../import/commit`
 applies the caller's per-person resolutions (`create`/`merge` into a chosen
-candidate with chosen `fields`/`skip`, keyed by GEDCOM xref)
+candidate with chosen `fields`/`skip`, keyed by GEDCOM xref). Import is
+idempotent: re-importing the same file matches everyone, writes nothing new, and
+dedupes edges, so the review flags each person `alreadyInTree` (no field/relationship
+delta) and the UI collapses those, surfacing only what's actually missing.
 then wires relationships via `createEdge` (reusing its referential-integrity +
 one-relationship-per-pair rules; a duplicate/self-loop is skipped, not fatal).
 The client re-sends the same GEDCOM text on commit, so nothing is staged

@@ -100,7 +100,8 @@ function fieldDiffs(imported, existing) {
 }
 
 // The relationships an imported person brings, described from their point of
-// view by the other endpoint's name — so the UI can say "adds parent: Jim Lott".
+// view by the other endpoint's name and xref — so the caller can tell which
+// ones are already in the tree vs genuinely new.
 function personRelationships(p, edges, peopleByXref) {
   const out = []
   for (const e of edges) {
@@ -116,7 +117,7 @@ function personRelationships(p, edges, peopleByXref) {
     }
     if (otherXref) {
       const other = peopleByXref.get(otherXref)
-      out.push({ relation, otherName: other ? importedFullName(other) : '(unknown)' })
+      out.push({ relation, otherXref, otherName: other ? importedFullName(other) : '(unknown)' })
     }
   }
   return out
@@ -205,7 +206,25 @@ export async function previewImport(groupId, gedcomText) {
   }
 
   const peopleByXref = new Map(people.map((pp) => [pp.xref, pp]))
-  const stats = { people: people.length, relationships: edges.length, strongMatches: 0, possibleMatches: 0, newPeople: 0 }
+  const stats = {
+    people: people.length,
+    relationships: edges.length,
+    strongMatches: 0,
+    possibleMatches: 0,
+    newPeople: 0,
+    // Suggested matches whose data + relationships are already fully in the tree
+    // — the "nothing to add" people that a repeat import can hide.
+    alreadyInTree: 0,
+  }
+
+  // A relationship already exists when both its endpoints resolve (by suggested
+  // match) to nodes that are already connected in the tree — so a re-import of
+  // the same file surfaces no "new" relationships.
+  const relExists = (aXref, bXref) => {
+    const a = assigned.get(aXref)
+    const b = assigned.get(bXref)
+    return !!(a && b && exAdj.get(a)?.has(b))
+  }
 
   const toCandidate = (p, c) => ({
     nodeId: c.node.nodeId,
@@ -230,9 +249,28 @@ export async function previewImport(groupId, gedcomText) {
       if (extra) candidates = [toCandidate(p, extra), ...candidates].slice(0, MAX_CANDIDATES)
     }
 
+    // Relationships this person brings, each flagged as new or already present.
+    const relationships = personRelationships(p, edges, peopleByXref).map((r) => ({
+      relation: r.relation,
+      otherName: r.otherName,
+      isNew: !relExists(p.xref, r.otherXref),
+    }))
+    const newRelationships = relationships.filter((r) => r.isNew).length
+
+    // "Already in the tree": a suggested match with no field to fill/resolve and
+    // no new relationship — nothing for the user to review on a repeat import.
+    const suggested = suggestedNodeId
+      ? candidates.find((c) => c.nodeId === suggestedNodeId)
+      : null
+    const hasFieldDelta = suggested
+      ? suggested.fieldDiffs.some((d) => d.status === 'fill' || d.status === 'conflict')
+      : false
+    const alreadyInTree = Boolean(suggestedNodeId) && !hasFieldDelta && newRelationships === 0
+
     if (suggestedNodeId) stats.strongMatches += 1
     else if (candidates.length) stats.possibleMatches += 1
     else stats.newPeople += 1
+    if (alreadyInTree) stats.alreadyInTree += 1
 
     return {
       xref: p.xref,
@@ -240,7 +278,8 @@ export async function previewImport(groupId, gedcomText) {
       fields: pickFields(p),
       candidates,
       suggestedNodeId,
-      relationships: personRelationships(p, edges, peopleByXref),
+      relationships,
+      alreadyInTree,
     }
   })
 

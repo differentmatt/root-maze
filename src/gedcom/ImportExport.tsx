@@ -288,11 +288,19 @@ function ReviewPanel({
     onConfirm(resolutions)
   }
 
-  const { strongMatches, possibleMatches, newPeople } = preview.stats
+  // On a repeat import, most people are already fully in the tree with nothing
+  // to add; keep the review focused on the ones with a real delta and tuck the
+  // rest behind a toggle. Their decisions still ride along (they default to
+  // merging into their existing node), so any relationships still get wired.
+  const needsReview = preview.people.filter((p) => !p.alreadyInTree)
+  const settled = preview.people.filter((p) => p.alreadyInTree)
+  const [showSettled, setShowSettled] = useState(false)
+
+  const { possibleMatches, newPeople, alreadyInTree } = preview.stats
   const summary = [
-    strongMatches && `${strongMatches} likely match${strongMatches === 1 ? '' : 'es'}`,
-    possibleMatches && `${possibleMatches} possible`,
     newPeople && `${newPeople} new`,
+    possibleMatches && `${possibleMatches} possible`,
+    alreadyInTree && `${alreadyInTree} already in your tree`,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -307,8 +315,14 @@ function ReviewPanel({
         </p>
       </div>
 
+      {needsReview.length === 0 && (
+        <p className="text-sm text-zinc-400">
+          Everything in this file is already in your tree — nothing to add.
+        </p>
+      )}
+
       <div className="flex flex-col gap-3">
-        {preview.people.map((p) => (
+        {needsReview.map((p) => (
           <PersonReview
             key={p.xref}
             person={p}
@@ -319,6 +333,22 @@ function ReviewPanel({
           />
         ))}
       </div>
+
+      {settled.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <button
+            onClick={() => setShowSettled((s) => !s)}
+            className="self-start text-xs text-zinc-500 hover:text-zinc-300"
+          >
+            {showSettled ? '▾' : '▸'} {settled.length} already in your tree
+          </button>
+          {showSettled && (
+            <p className="text-xs text-zinc-500">
+              {settled.map((p) => p.fullName).join(', ')}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <button
@@ -386,14 +416,18 @@ function PersonReview({
         </div>
       </div>
 
-      {person.relationships.length > 0 && (
-        <p className="text-xs text-zinc-500">
-          From file:{' '}
-          {person.relationships
-            .map((r) => `${RELATION_LABEL[r.relation]} ${r.otherName}`)
-            .join(' · ')}
-        </p>
-      )}
+      {(() => {
+        // Show new relationships prominently ("Adds: …"); a relationship already
+        // in the tree isn't worth the user's attention on a repeat import.
+        const added = person.relationships.filter((r) => r.isNew)
+        if (!added.length) return null
+        return (
+          <p className="text-xs text-zinc-500">
+            Adds:{' '}
+            {added.map((r) => `${RELATION_LABEL[r.relation]} ${r.otherName}`).join(' · ')}
+          </p>
+        )
+      })()}
 
       {decision.action === 'merge' && hasCandidates && (
         <div className="flex flex-col gap-2">
