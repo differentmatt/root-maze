@@ -1,4 +1,4 @@
-import { getItem, putItem, queryPrefix } from './dynamo.js'
+import { getItem, putItem, queryPrefix, queryAll } from './dynamo.js'
 import { newEdgeId } from './ids.js'
 import { appendLog } from './groups.js'
 import { getNode } from './nodes.js'
@@ -64,13 +64,53 @@ export function resolveSubtype(kind, subtype) {
 }
 
 export async function listEdges(groupId) {
-  const items = await queryPrefix(`GROUP#${groupId}`, 'EDGE#')
+  const items = await queryAll(`GROUP#${groupId}`, 'EDGE#')
   return items.filter((i) => !i.deletedAt).map(toEdge)
 }
 
 export async function getEdge(groupId, edgeId) {
   const item = await getItem(edgeKey(groupId, edgeId))
   if (!item || item.deletedAt) return null
+  return toEdge(item)
+}
+
+// Thin edge writer for bulk operations (e.g. GEDCOM import). Unlike
+// createEdge, this does NOT query DynamoDB to detect duplicates — instead
+// it relies on a caller-supplied Set of already-seen pair keys. The caller
+// must pre-populate `pairsSeen` from `listEdges` before the first call and
+// must also guarantee both endpoints are live nodes in the group. Returns
+// the new edge, or null if the pair was already in `pairsSeen`.
+export async function putEdgeIfNew(groupId, accountId, input, pairsSeen) {
+  const { edgeKind, fromPerson, toPerson } = input
+  if (fromPerson === toPerson) return null
+  const key = [fromPerson, toPerson].sort().join('|')
+  if (pairsSeen.has(key)) return null
+  // Claim the pair immediately so concurrent calls in the same batch don't
+  // both succeed for the same pair.
+  pairsSeen.add(key)
+
+  const subtype = resolveSubtype(edgeKind, input.subtype)
+  const edgeId = newEdgeId()
+  const now = new Date().toISOString()
+
+  const item = {
+    ...edgeKey(groupId, edgeId),
+    edgeId,
+    groupId,
+    edgeKind,
+    fromPerson,
+    toPerson,
+    subtype,
+    startDate: input.startDate ?? null,
+    endDate: input.endDate ?? null,
+    createdAt: now,
+    updatedAt: now,
+    updatedBy: accountId,
+    deletedAt: null,
+  }
+
+  await putItem(item)
+  await appendLog(groupId, accountId, 'create', 'edge', edgeId, null, toEdge(item))
   return toEdge(item)
 }
 

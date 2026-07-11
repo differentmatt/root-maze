@@ -326,16 +326,51 @@ function buildFamilies(edges) {
 
   for (const [kid, parents] of childParents) {
     const list = [...parents]
-    // Two parents who are a recorded couple -> their existing family.
-    let key
-    if (list.length === 2 && partnerOf.get(list[0])?.has(list[1])) {
-      key = coupleKey(list[0], list[1])
+
+    if (list.length <= 2) {
+      // Original logic: use the couple's existing family when applicable.
+      let key
+      if (list.length === 2 && partnerOf.get(list[0])?.has(list[1])) {
+        key = coupleKey(list[0], list[1])
+      } else {
+        key = 'P:' + list.sort().join('|')
+      }
+      const fam = ensure(key)
+      for (const p of list) fam.parents.add(p)
+      fam.children.add(kid)
     } else {
-      key = 'P:' + list.sort().join('|')
+      // 3+ parents: GEDCOM FAM records hold at most HUSB + WIFE (2 parents).
+      // Pair up partners into their existing couple families first, then give
+      // each remaining parent their own solo family so every parent-child edge
+      // is preserved in the output.
+      const covered = new Set()
+
+      for (let i = 0; i < list.length; i++) {
+        if (covered.has(list[i])) continue
+        for (let j = i + 1; j < list.length; j++) {
+          if (covered.has(list[j])) continue
+          if (partnerOf.get(list[i])?.has(list[j])) {
+            const key = coupleKey(list[i], list[j])
+            const fam = ensure(key)
+            fam.parents.add(list[i])
+            fam.parents.add(list[j])
+            fam.children.add(kid)
+            covered.add(list[i])
+            covered.add(list[j])
+            break
+          }
+        }
+      }
+
+      // Solo family for each parent not covered by a couple family.
+      for (const p of list) {
+        if (covered.has(p)) continue
+        const key = 'P:' + p
+        const fam = ensure(key)
+        fam.parents.add(p)
+        fam.children.add(kid)
+      }
     }
-    const fam = ensure(key)
-    for (const p of list) fam.parents.add(p)
-    fam.children.add(kid)
   }
 
   return [...families.values()].filter(
@@ -363,6 +398,7 @@ export function graphToGedcom(graph, opts = {}) {
   lines.push('0 HEAD')
   lines.push('1 SOUR ROOT_MAZE')
   if (opts.treeName) lines.push(...textLines(2, 'NAME', opts.treeName))
+  lines.push('1 SUBM @SUBM1@')
   lines.push('1 GEDC')
   lines.push('2 VERS 5.5.1')
   lines.push('2 FORM LINEAGE-LINKED')
@@ -408,16 +444,20 @@ export function graphToGedcom(graph, opts = {}) {
     if (husb) lines.push(line(1, 'HUSB', idFor.get(husb)))
     if (wife) lines.push(line(1, 'WIFE', idFor.get(wife)))
     for (const c of kids) lines.push(line(1, 'CHIL', idFor.get(c)))
-    if (fam.subtype) {
+    // Only emit MARR for partnership subtypes that represent a marriage;
+    // a plain 'partner' edge is not a marriage and must not produce MARR.
+    if (['married', 'remarried', 'ex'].includes(fam.subtype)) {
       lines.push('1 MARR')
       if (fam.startDate) lines.push(line(2, 'DATE', fam.startDate))
-      if (fam.subtype === 'ex') {
-        lines.push('1 DIV')
-        if (fam.endDate) lines.push(line(2, 'DATE', fam.endDate))
-      }
+    }
+    if (fam.subtype === 'ex') {
+      lines.push('1 DIV')
+      if (fam.endDate) lines.push(line(2, 'DATE', fam.endDate))
     }
   })
 
+  lines.push('0 @SUBM1@ SUBM')
+  lines.push('1 NAME ROOT_MAZE')
   lines.push('0 TRLR')
   return lines.join('\n') + '\n'
 }

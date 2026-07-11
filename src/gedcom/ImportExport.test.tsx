@@ -44,6 +44,7 @@ const previewWithConflict = {
       match: {
         nodeId: 'nod_existing',
         name: 'Ada King',
+        updatedAt: '2024-01-01T00:00:00.000Z',
         fills: [],
         conflicts: [{ field: 'birthdate' as const, existing: '1820', imported: '1815' }],
       },
@@ -93,14 +94,15 @@ describe('ImportExport review flow', () => {
     await waitFor(() => expect(commitImport).toHaveBeenCalled())
     const [, gedcom, resolutions] = vi.mocked(commitImport).mock.calls[0]
     expect(gedcom).toBe('0 HEAD\n0 TRLR')
-    // Default: merge, keep current (no overwrite), and the new person is omitted
-    // (server defaults it to create).
+    // Default: merge with no overwrites for the matched person.
     expect(resolutions['@I1@']).toEqual({
       action: 'merge',
       nodeId: 'nod_existing',
+      updatedAt: '2024-01-01T00:00:00.000Z',
       overwrite: [],
     })
-    expect(resolutions['@I2@']).toBeUndefined()
+    // Unmatched person gets an explicit create resolution.
+    expect(resolutions['@I2@']).toEqual({ action: 'create' })
     await screen.findByText(/Imported 1 new/)
   })
 
@@ -126,6 +128,7 @@ describe('ImportExport review flow', () => {
     expect(resolutions['@I1@']).toEqual({
       action: 'merge',
       nodeId: 'nod_existing',
+      updatedAt: '2024-01-01T00:00:00.000Z',
       overwrite: ['birthdate'],
     })
   })
@@ -150,5 +153,35 @@ describe('ImportExport review flow', () => {
     await waitFor(() => expect(commitImport).toHaveBeenCalled())
     const [, , resolutions] = vi.mocked(commitImport).mock.calls[0]
     expect(resolutions['@I1@']).toEqual({ action: 'skip' })
+  })
+
+  it('skips an unmatched (fresh) person when Skip is chosen', async () => {
+    vi.mocked(previewImport).mockResolvedValue(previewWithConflict)
+    vi.mocked(commitImport).mockResolvedValue({
+      created: 1,
+      merged: 1,
+      skipped: 1,
+      relationshipsCreated: 0,
+      relationshipsSkipped: 1,
+    })
+
+    render(<ImportExport group={group} onCreated={vi.fn()} />)
+    pickFile(/Import GEDCOM into this group/, '0 HEAD')
+    await screen.findByText('Review import')
+
+    // The fresh person row has an "Add" (create) and "skip" button.
+    const skipButtons = screen.getAllByRole('button', { name: /^skip$/i })
+    // There should be a skip button for both the matched person and the fresh person.
+    expect(skipButtons.length).toBeGreaterThanOrEqual(1)
+    // Click the skip button associated with the fresh person (New Person row).
+    const freshPersonRow = screen.getByText('New Person').closest('div')!
+    const skipBtn = freshPersonRow.querySelector('button[class*="text-zinc"]')
+    // Use the second skip button (index 1) for the fresh row.
+    fireEvent.click(skipButtons[skipButtons.length - 1])
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+
+    await waitFor(() => expect(commitImport).toHaveBeenCalled())
+    const [, , resolutions] = vi.mocked(commitImport).mock.calls[0]
+    expect(resolutions['@I2@']).toEqual({ action: 'skip' })
   })
 })

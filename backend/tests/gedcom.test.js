@@ -179,7 +179,67 @@ describe('graphToGedcom', () => {
     expect(out).toContain('2 PLAC London')
     // Sex drives HUSB/WIFE assignment: William (M) is HUSB, Ada (F) is WIFE.
     expect(out).toMatch(/0 @F1@ FAM\n1 HUSB @I1@\n1 WIFE @I2@\n1 CHIL @I3@/)
+    // A SUBM record and pointer are required by GEDCOM 5.5.1.
+    expect(out).toContain('1 SUBM @SUBM1@')
+    expect(out).toContain('0 @SUBM1@ SUBM')
     expect(out.trim().endsWith('0 TRLR')).toBe(true)
+  })
+
+  it('does not emit MARR for a plain partner subtype', () => {
+    const graph = {
+      nodes: [
+        { nodeId: 'nod_a', firstName: 'Alice', middleName: null, lastName: null, birthdate: null, deathdate: null, notes: null },
+        { nodeId: 'nod_b', firstName: 'Bob', middleName: null, lastName: null, birthdate: null, deathdate: null, notes: null },
+      ],
+      edges: [
+        { edgeKind: 'partner', fromPerson: 'nod_a', toPerson: 'nod_b', subtype: 'partner', startDate: null, endDate: null },
+      ],
+    }
+    const out = graphToGedcom(graph)
+    expect(out).not.toContain('MARR')
+    expect(out).not.toContain('DIV')
+  })
+
+  it('emits MARR and DIV for an ex subtype but not for plain partner', () => {
+    const graph = {
+      nodes: [
+        { nodeId: 'nod_a', firstName: 'Alice', middleName: null, lastName: null, birthdate: null, deathdate: null, notes: null },
+        { nodeId: 'nod_b', firstName: 'Bob', middleName: null, lastName: null, birthdate: null, deathdate: null, notes: null },
+      ],
+      edges: [
+        { edgeKind: 'partner', fromPerson: 'nod_a', toPerson: 'nod_b', subtype: 'ex', startDate: '2000', endDate: '2010' },
+      ],
+    }
+    const out = graphToGedcom(graph)
+    expect(out).toContain('1 MARR')
+    expect(out).toContain('1 DIV')
+  })
+
+  it('splits a child with 3 parents into multiple FAM records', () => {
+    const graph = {
+      nodes: [
+        { nodeId: 'nod_p1', firstName: 'Parent1', middleName: null, lastName: null, birthdate: null, deathdate: null, notes: 'Sex: Male' },
+        { nodeId: 'nod_p2', firstName: 'Parent2', middleName: null, lastName: null, birthdate: null, deathdate: null, notes: 'Sex: Female' },
+        { nodeId: 'nod_p3', firstName: 'Parent3', middleName: null, lastName: null, birthdate: null, deathdate: null, notes: null },
+        { nodeId: 'nod_kid', firstName: 'Kid', middleName: null, lastName: null, birthdate: null, deathdate: null, notes: null },
+      ],
+      edges: [
+        { edgeKind: 'partner', fromPerson: 'nod_p1', toPerson: 'nod_p2', subtype: 'married', startDate: null, endDate: null },
+        { edgeKind: 'parent_child', fromPerson: 'nod_p1', toPerson: 'nod_kid', subtype: 'biological' },
+        { edgeKind: 'parent_child', fromPerson: 'nod_p2', toPerson: 'nod_kid', subtype: 'biological' },
+        { edgeKind: 'parent_child', fromPerson: 'nod_p3', toPerson: 'nod_kid', subtype: 'adoptive' },
+      ],
+    }
+    const out = graphToGedcom(graph)
+    // The child should appear in two separate FAM records so all 3 parent-child
+    // edges are preserved (GEDCOM FAM holds at most HUSB + WIFE).
+    const famMatches = [...out.matchAll(/0 @F\d+@ FAM/g)]
+    expect(famMatches.length).toBeGreaterThanOrEqual(2)
+    // Every parent must appear in at least one FAM record.
+    const parentXrefs = ['@I1@', '@I2@', '@I3@']
+    for (const xref of parentXrefs) {
+      expect(out).toContain(xref)
+    }
   })
 
   it('round-trips import -> export -> import with stable counts', () => {

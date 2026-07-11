@@ -1,6 +1,6 @@
 import { parseGedcom, gedcomToImport, gedcomTreeName } from './gedcom.js'
 import { listNodes, getNode, createNode, updateNode, nodeFullName } from './nodes.js'
-import { createEdge } from './edges.js'
+import { listEdges, putEdgeIfNew } from './edges.js'
 import { ValidationError } from './errors.js'
 
 // Import orchestration: the DynamoDB-facing half of GEDCOM support. Parsing and
@@ -82,15 +82,27 @@ export async function previewImport(groupId, gedcomText) {
   }
 
   let matched = 0
+  // Track which existing nodes have already been claimed as a match so two
+  // different imported records don't both resolve to the same node (which
+  // would silently collapse distinct people into one on commit).
+  const claimedNodes = new Set()
   const preview = people.map((p) => {
-    const match = chooseMatch(p, byName.get(norm(importedFullName(p))))
+    // Only offer candidates that haven't been claimed by an earlier record.
+    const candidates = (byName.get(norm(importedFullName(p))) || []).filter(
+      (c) => !claimedNodes.has(c.nodeId),
+    )
+    const match = chooseMatch(p, candidates)
     let matchInfo = null
     if (match) {
+      claimedNodes.add(match.nodeId)
       matched += 1
       const { fills, conflicts } = diffFields(p, match)
       matchInfo = {
         nodeId: match.nodeId,
         name: nodeFullName(match),
+        // Include the node's current updatedAt so commit can detect if the
+        // node was edited between preview and confirm (stale-merge guard).
+        updatedAt: match.updatedAt,
         fills,
         conflicts,
       }
@@ -157,7 +169,14 @@ export async function commitImport(groupId, accountId, gedcomText, resolutions =
     }
 
     if (res.action === 'merge' && res.nodeId) {
-      const applied = await mergePerson(groupId, accountId, res.nodeId, p, res.overwrite)
+      const applied = await mergePerson(
+        groupId,
+        accountId,
+        res.nodeId,
+        p,
+        res.overwrite,
+        res.updatedAt,
+      )
       if (applied) {
         xrefToNode.set(p.xref, res.nodeId)
         summary.merged += 1
@@ -172,6 +191,13 @@ export async function commitImport(groupId, accountId, gedcomText, resolutions =
     summary.created += 1
   }
 
+  // Preload all existing edges once so duplicate detection during the edge
+  // loop is O(1) per edge rather than O(E) (one DynamoDB Query per edge).
+  const existingEdges = await listEdges(groupId)
+  const pairsSeen = new Set(
+    existingEdges.map((e) => [e.fromPerson, e.toPerson].sort().join('|')),
+  )
+
   for (const e of edges) {
     const from = xrefToNode.get(e.from)
     const to = xrefToNode.get(e.to)
@@ -179,22 +205,21 @@ export async function commitImport(groupId, accountId, gedcomText, resolutions =
       summary.relationshipsSkipped += 1
       continue
     }
-    try {
-      await createEdge(groupId, accountId, {
+    const created = await putEdgeIfNew(
+      groupId,
+      accountId,
+      {
         edgeKind: e.kind,
         fromPerson: from,
         toPerson: to,
         subtype: e.subtype,
         startDate: e.startDate,
         endDate: e.endDate,
-      })
-      summary.relationshipsCreated += 1
-    } catch (err) {
-      // A pair already connected (or a self-loop from two xrefs merged into one
-      // node) is expected during a merge — skip it, don't fail the import.
-      if (err instanceof ValidationError) summary.relationshipsSkipped += 1
-      else throw err
-    }
+      },
+      pairsSeen,
+    )
+    if (created) summary.relationshipsCreated += 1
+    else summary.relationshipsSkipped += 1
   }
 
   return summary
@@ -202,9 +227,18 @@ export async function commitImport(groupId, accountId, gedcomText, resolutions =
 
 // Fold an imported person into an existing node: fill empty fields, and
 // overwrite the named ones. Returns false if the target node is gone.
-async function mergePerson(groupId, accountId, nodeId, imported, overwrite = []) {
+// Throws ValidationError if the node was edited since the preview was
+// generated (stale-merge guard: `expectedUpdatedAt` comes from the preview
+// response and is echoed back by the client in the resolution).
+async function mergePerson(groupId, accountId, nodeId, imported, overwrite = [], expectedUpdatedAt = null) {
   const existing = await getNode(groupId, nodeId)
   if (!existing) return false
+
+  if (expectedUpdatedAt && existing.updatedAt !== expectedUpdatedAt) {
+    throw new ValidationError(
+      `"${nodeFullName(existing)}" was edited after the preview was generated — re-run the import preview to get fresh data`,
+    )
+  }
 
   const over = new Set(overwrite)
   const patch = {}

@@ -11,10 +11,14 @@ vi.mock('../lib/nodes.js', async () => {
     updateNode: vi.fn(),
   }
 })
-vi.mock('../lib/edges.js', () => ({ createEdge: vi.fn() }))
+vi.mock('../lib/edges.js', () => ({
+  createEdge: vi.fn(),
+  listEdges: vi.fn(),
+  putEdgeIfNew: vi.fn(),
+}))
 
 import { listNodes, getNode, createNode, updateNode } from '../lib/nodes.js'
-import { createEdge } from '../lib/edges.js'
+import { listEdges, putEdgeIfNew } from '../lib/edges.js'
 import { ValidationError } from '../lib/errors.js'
 import { previewImport, commitImport } from '../lib/gedcom-import.js'
 
@@ -36,12 +40,18 @@ const GED = `0 HEAD
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(listNodes).mockResolvedValue([])
+  vi.mocked(listEdges).mockResolvedValue([])
   vi.mocked(createNode).mockImplementation(async (_g, _a, input) => ({
     nodeId: 'nod_' + input.firstName,
     ...input,
   }))
   vi.mocked(updateNode).mockResolvedValue({})
-  vi.mocked(createEdge).mockResolvedValue({})
+  vi.mocked(putEdgeIfNew).mockImplementation(async (_g, _a, _input, pairsSeen) => {
+    const key = [_input.fromPerson, _input.toPerson].sort().join('|')
+    if (pairsSeen.has(key)) return null
+    pairsSeen.add(key)
+    return {}
+  })
 })
 
 describe('previewImport', () => {
@@ -113,6 +123,27 @@ describe('previewImport', () => {
     const ada = preview.people.find((p) => p.fullName === 'Ada King')
     expect(ada.match).toBeNull()
   })
+
+  it('does not suggest the same existing node to two different imported people', async () => {
+    // Two imported people with the same name; only one existing node.
+    const gedTwins = `0 HEAD\n0 @I1@ INDI\n1 NAME Ada /King/\n0 @I2@ INDI\n1 NAME Ada /King/\n0 TRLR`
+    vi.mocked(listNodes).mockResolvedValueOnce([
+      {
+        nodeId: 'nod_ada',
+        firstName: 'Ada',
+        middleName: null,
+        lastName: 'King',
+        birthdate: null,
+        deathdate: null,
+        notes: null,
+        updatedAt: '2024-01-01',
+      },
+    ])
+    const preview = await previewImport('g1', gedTwins)
+    const matches = preview.people.filter((p) => p.match !== null)
+    // At most one of the two should be matched to the single existing node.
+    expect(matches.length).toBe(1)
+  })
 })
 
 describe('commitImport', () => {
@@ -121,11 +152,11 @@ describe('commitImport', () => {
     expect(summary.created).toBe(2)
     expect(summary.merged).toBe(0)
     expect(summary.relationshipsCreated).toBe(1)
-    expect(createEdge).toHaveBeenCalledTimes(1)
-    expect(createEdge).toHaveBeenCalledWith('g1', 'acc_1', expect.objectContaining({
+    expect(putEdgeIfNew).toHaveBeenCalledTimes(1)
+    expect(putEdgeIfNew).toHaveBeenCalledWith('g1', 'acc_1', expect.objectContaining({
       edgeKind: 'partner',
       subtype: 'partner',
-    }))
+    }), expect.any(Set))
   })
 
   it('skips a person and drops relationships that touch them', async () => {
@@ -137,7 +168,7 @@ describe('commitImport', () => {
     // The partner edge needs @I1@, which was skipped -> not created.
     expect(summary.relationshipsCreated).toBe(0)
     expect(summary.relationshipsSkipped).toBe(1)
-    expect(createEdge).not.toHaveBeenCalled()
+    expect(putEdgeIfNew).not.toHaveBeenCalled()
   })
 
   it('merges into an existing node, filling empties and overwriting on request', async () => {
@@ -149,10 +180,16 @@ describe('commitImport', () => {
       birthdate: null, // empty -> import fills it
       deathdate: null,
       notes: 'Keep me',
+      updatedAt: '2024-01-01T00:00:00.000Z',
     })
 
     const summary = await commitImport('g1', 'acc_1', GED, {
-      '@I1@': { action: 'merge', nodeId: 'nod_existing', overwrite: ['notes'] },
+      '@I1@': {
+        action: 'merge',
+        nodeId: 'nod_existing',
+        overwrite: ['notes'],
+        updatedAt: '2024-01-01T00:00:00.000Z',
+      },
     })
 
     expect(summary.merged).toBe(1)
@@ -161,8 +198,48 @@ describe('commitImport', () => {
     expect(patch.birthdate).toBe('1815') // filled (was empty)
   })
 
+  it('rejects a stale merge when updatedAt has changed since preview', async () => {
+    vi.mocked(getNode).mockResolvedValue({
+      nodeId: 'nod_existing',
+      firstName: 'Ada',
+      middleName: null,
+      lastName: 'King',
+      birthdate: null,
+      deathdate: null,
+      notes: null,
+      updatedAt: '2024-06-01T00:00:00.000Z', // newer than the preview snapshot
+    })
+
+    await expect(
+      commitImport('g1', 'acc_1', GED, {
+        '@I1@': {
+          action: 'merge',
+          nodeId: 'nod_existing',
+          overwrite: [],
+          updatedAt: '2024-01-01T00:00:00.000Z', // stale
+        },
+      }),
+    ).rejects.toThrow(ValidationError)
+  })
+
   it('counts a duplicate relationship as skipped rather than failing', async () => {
-    vi.mocked(createEdge).mockRejectedValueOnce(new ValidationError('already connected'))
+    // Simulate an existing edge for the pair that will be imported.
+    vi.mocked(listEdges).mockResolvedValueOnce([
+      {
+        edgeId: 'edge_1',
+        fromPerson: 'nod_Ada',
+        toPerson: 'nod_William',
+        edgeKind: 'partner',
+        subtype: 'partner',
+        startDate: null,
+        endDate: null,
+        createdAt: '2024-01-01',
+        updatedAt: '2024-01-01',
+        updatedBy: 'acc_1',
+      },
+    ])
+    // putEdgeIfNew returns null when pair already exists.
+    vi.mocked(putEdgeIfNew).mockResolvedValueOnce(null)
     const summary = await commitImport('g1', 'acc_1', GED, {})
     expect(summary.relationshipsSkipped).toBe(1)
     expect(summary.relationshipsCreated).toBe(0)
@@ -171,7 +248,7 @@ describe('commitImport', () => {
   it('falls back to create when a merge target has vanished', async () => {
     vi.mocked(getNode).mockResolvedValueOnce(null)
     const summary = await commitImport('g1', 'acc_1', GED, {
-      '@I1@': { action: 'merge', nodeId: 'gone' },
+      '@I1@': { action: 'merge', nodeId: 'gone', overwrite: [], updatedAt: '2024-01-01' },
     })
     expect(summary.merged).toBe(0)
     expect(summary.created).toBe(2)

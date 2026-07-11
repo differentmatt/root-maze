@@ -71,6 +71,32 @@ export async function queryPrefix(pk, skPrefix) {
   return Items || []
 }
 
+// Like queryPrefix but paginates through all pages, following LastEvaluatedKey.
+// Use this whenever the result set may exceed DynamoDB's 1 MB per-page limit
+// (e.g. listing all nodes or edges for export / import matching).
+export async function queryAll(pk, skPrefix) {
+  const items = []
+  let lastKey = undefined
+  do {
+    const { Items, LastEvaluatedKey } = await client.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: skPrefix
+          ? 'PK = :pk AND begins_with(SK, :sk)'
+          : 'PK = :pk',
+        ExpressionAttributeValues: {
+          ':pk': pk,
+          ...(skPrefix ? { ':sk': skPrefix } : {}),
+        },
+        ExclusiveStartKey: lastKey,
+      }),
+    )
+    if (Items) items.push(...Items)
+    lastKey = LastEvaluatedKey
+  } while (lastKey)
+  return items
+}
+
 // Query the GSI1 index by its partition key, optionally filtered to a
 // GSI1SK prefix. Used to list "the groups this account belongs to".
 export async function queryIndexPrefix(gsi1pk, gsi1skPrefix) {

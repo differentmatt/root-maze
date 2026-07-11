@@ -4,6 +4,7 @@ vi.mock('../lib/dynamo.js', () => ({
   getItem: vi.fn(),
   putItem: vi.fn(),
   queryPrefix: vi.fn(),
+  queryAll: vi.fn(),
 }))
 // appendLog writes to the log via dynamo; stub it so node tests stay focused.
 vi.mock('../lib/groups.js', () => ({ appendLog: vi.fn() }))

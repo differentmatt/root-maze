@@ -212,11 +212,13 @@ function ReviewPanel({
   const matched = preview.people.filter((p) => p.match)
   const fresh = preview.people.filter((p) => !p.match)
 
-  // Only matched people need a stored decision; everyone else is created by
-  // default. Seed each match with action=merge and no overwrites.
+  // Only matched people need a stored decision; everyone else defaults to
+  // `create`. Fresh (unmatched) people are seeded here too so the user can
+  // choose to skip them.
   const [decisions, setDecisions] = useState<Record<string, Decision>>(() => {
     const seed: Record<string, Decision> = {}
     for (const p of matched) seed[p.xref] = { action: 'merge', overwrite: new Set() }
+    for (const p of fresh) seed[p.xref] = { action: 'create', overwrite: new Set() }
     return seed
   })
 
@@ -235,18 +237,21 @@ function ReviewPanel({
 
   function confirm() {
     const resolutions: Record<string, ImportResolution> = {}
-    for (const p of matched) {
+    for (const p of [...matched, ...fresh]) {
       const d = decisions[p.xref]
-      if (d.action === 'skip') resolutions[p.xref] = { action: 'skip' }
-      else if (d.action === 'create') resolutions[p.xref] = { action: 'create' }
-      else
+      if (d.action === 'skip') {
+        resolutions[p.xref] = { action: 'skip' }
+      } else if (d.action === 'create' || !p.match) {
+        resolutions[p.xref] = { action: 'create' }
+      } else {
         resolutions[p.xref] = {
           action: 'merge',
-          nodeId: p.match!.nodeId,
+          nodeId: p.match.nodeId,
+          updatedAt: p.match.updatedAt,
           overwrite: [...d.overwrite],
         }
+      }
     }
-    // Unmatched people are left out -> the server defaults them to create.
     onConfirm(resolutions)
   }
 
@@ -279,13 +284,33 @@ function ReviewPanel({
       )}
 
       {fresh.length > 0 && (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-2">
           <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
             New people ({fresh.length})
           </p>
-          <p className="truncate text-xs text-zinc-400">
-            {fresh.map((p) => p.fullName).join(', ')}
-          </p>
+          {fresh.map((p) => (
+            <div
+              key={p.xref}
+              className="flex items-center justify-between gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-2"
+            >
+              <p className="text-sm text-zinc-300">{p.fullName}</p>
+              <div className="flex gap-1 rounded border border-zinc-800 p-0.5 text-xs">
+                {(['create', 'skip'] as const).map((a) => (
+                  <button
+                    key={a}
+                    onClick={() => setAction(p.xref, a)}
+                    className={`rounded px-2 py-1 capitalize ${
+                      decisions[p.xref]?.action === a
+                        ? 'bg-zinc-100 text-zinc-900'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    {a === 'create' ? 'Add' : a}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -415,9 +440,10 @@ function NewGroupFromFile({
   async function create() {
     if (!name.trim() || !file) return
     setStatus('working')
+    let group: Group | null = null
     try {
       const gedcom = await file.text()
-      const group = await createGroup(name.trim())
+      group = await createGroup(name.trim())
       // A brand-new group is empty, so every person imports as new — no review.
       await commitImport(group.groupId, gedcom, {})
       setOpen(false)
@@ -427,6 +453,10 @@ function NewGroupFromFile({
       await onCreated(group)
     } catch (err) {
       setStatus({ error: err instanceof Error ? err.message : 'Import failed' })
+      // If the group was already persisted but the import failed, hand it back
+      // to the workspace so the user can see and manage the (possibly partial)
+      // group rather than losing it entirely.
+      if (group) await onCreated(group).catch(() => {})
     }
   }
 

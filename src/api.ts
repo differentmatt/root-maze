@@ -354,6 +354,9 @@ export interface ImportConflict {
 export interface ImportMatch {
   nodeId: string
   name: string
+  // The node's updatedAt at preview time. The client echoes this back in the
+  // merge resolution so the server can reject a stale-merge.
+  updatedAt: string
   fills: ImportFill[]
   conflicts: ImportConflict[]
 }
@@ -375,7 +378,7 @@ export interface ImportPreview {
 export type ImportResolution =
   | { action: 'create' }
   | { action: 'skip' }
-  | { action: 'merge'; nodeId: string; overwrite: string[] }
+  | { action: 'merge'; nodeId: string; overwrite: string[]; updatedAt: string }
 
 export interface ImportSummary {
   created: number
