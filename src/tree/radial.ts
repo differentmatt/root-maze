@@ -9,13 +9,15 @@
 // each subtree gets a contiguous angular wedge — keeps a crossing-free backbone
 // that the layered layout can't guarantee.
 //
-// Shape:
-//   - the focus person sits at the center (ring 0),
-//   - ancestors fan outward through the UPPER hemisphere (parents, grandparents…),
-//   - descendants fan outward through the LOWER hemisphere (children, grandkids…),
-//   - the focus's siblings cluster just above center, spouses just below,
-//   - a couple's shared children collapse onto a single "union" junction so the
-//     chart draws one stem per family instead of one edge per parent×child.
+// Shape (everyone but the focus is a wedge):
+//   - the focus person sits as a disc at the center,
+//   - ancestors fan outward through the UPPER hemisphere as nested wedges
+//     (parents, grandparents…), colored by ancestral branch,
+//   - descendants fan outward through the LOWER hemisphere as nested wedges
+//     (children, grandkids…); a married-in co-parent, who can't nest in the
+//     fan, is drawn as a thin "spouse band" at the base of that union's kids,
+//   - the focus's siblings and childless partners fill the clear horizontal
+//     channels on the left and right as ring-1 slices.
 //
 // Everything is seeded from the input order (no randomness) so the layout is
 // stable across re-renders and testable.

@@ -136,6 +136,24 @@ describe('computeRadialLayout', () => {
     expect(kids.map((w) => w.id).sort()).toEqual(['c1', 'c2'])
   })
 
+  it('splits the spouse band between co-parents of a >2-parent child', () => {
+    // Focus mom + dad + an adoptive parent all parent one child: the union has
+    // two co-parents, so their bands tile the block rather than overlapping.
+    const ids = ['mom', 'dad', 'adopt', 'kid']
+    const l = computeRadialLayout(
+      ids,
+      [pc('mom', 'kid'), pc('dad', 'kid'), pc('adopt', 'kid', 'adoptive')],
+      'mom',
+    )
+    const bands = l.wedges
+      .filter((w) => w.kind === 'spouse')
+      .sort((a, b) => a.a0 - b.a0)
+    expect(bands.map((b) => b.id).sort()).toEqual(['adopt', 'dad'])
+    // Disjoint, non-overlapping arcs (the bug was every band using the full arc).
+    expect(bands[1].a0).toBeGreaterThanOrEqual(bands[0].a1 - 1e-9)
+    expect(bands[0].a1).toBeLessThan(bands[1].a1)
+  })
+
   it('marks a spouse band as ended when the marriage has ended', () => {
     const ids = ['p', 'ex', 'c']
     const l = computeRadialLayout(
