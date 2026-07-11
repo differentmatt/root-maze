@@ -249,9 +249,9 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
             </p>
             <p>
               <span className="text-zinc-100">Radial</span> — one person at the
-              center, ancestors fanning up and descendants fanning down; tap
-              anyone to re-root the chart on them. Best for large or complex
-              families on a phone.
+              center, ancestors as a color-coded fan above (one hue per family
+              branch) and descendants below; tap anyone to re-root the chart on
+              them. Best for large or complex families on a phone.
             </p>
           </section>
 
@@ -314,6 +314,13 @@ function Legend() {
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-3 w-3 rounded-full border-2 border-dashed border-zinc-400" />{' '}
         half-sibling
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-flex h-3 w-3 overflow-hidden rounded-full">
+          <span className="h-full w-1/2 bg-sky-500/50" />
+          <span className="h-full w-1/2 bg-rose-500/50" />
+        </span>{' '}
+        fan color = ancestral branch
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-3 w-3 rounded-full border-2 border-emerald-400" />{' '}

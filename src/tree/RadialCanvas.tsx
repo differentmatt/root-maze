@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { PersonNode, Edge } from '../api'
-import { computeRadialLayout, type RadialInputEdge } from './radial'
+import {
+  computeRadialLayout,
+  type AncestorWedge,
+  type RadialInputEdge,
+} from './radial'
 import { usePanZoom, type View } from './panzoom'
-import { labelFor } from './names'
+import { labelFor, shortName } from './names'
 
 // A square viewport — a circle fills a portrait phone screen far better than the
 // wide layered layout, so the radial view gets its own 1:1 canvas.
@@ -13,9 +17,48 @@ const NODE_R = 14
 const JUNCTION_R = 3.5
 const FIT_PAD = 40
 
-// The ego-centric radial chart: the focus person at the center, ancestors
-// fanning up and descendants fanning down, with couples' shared children
-// collapsed onto union junctions. Tap anyone to re-root the chart on them. It
+// One soft hue per ancestral branch, echoing the familiar four-color fan chart
+// (green / red / blue / gold …); indexed by a wedge's lineage, wrapping for
+// deep or unusually branchy trees.
+const LINEAGE_COLORS = [
+  '#8bb04f', '#cf6b5c', '#5b9bd5', '#e3b34a',
+  '#9b7fc7', '#4bb0a0', '#d98c50', '#c77fb0',
+]
+
+// SVG path for an annular sector (a fan wedge) between radii r0..r1 over angles
+// a0..a1. Angles are math-convention; y is flipped so the fan sweeps the upper
+// half. As θ increases the point moves counter-clockwise on screen, so the outer
+// arc uses sweep-flag 0 and the inner (returning) arc sweep-flag 1.
+function wedgePath(w: AncestorWedge): string {
+  const pt = (r: number, a: number) =>
+    `${(r * Math.cos(a)).toFixed(2)} ${(-r * Math.sin(a)).toFixed(2)}`
+  const large = w.a1 - w.a0 > Math.PI ? 1 : 0
+  return (
+    `M ${pt(w.r1, w.a0)} A ${w.r1} ${w.r1} 0 ${large} 0 ${pt(w.r1, w.a1)}` +
+    ` L ${pt(w.r0, w.a1)} A ${w.r0} ${w.r0} 0 ${large} 1 ${pt(w.r0, w.a0)} Z`
+  )
+}
+
+// Where and how to draw a wedge's label: centered in the wedge and rotated
+// tangent to its ring, which keeps every label upright across the upper fan
+// (horizontal at the top, vertical at the sides).
+function wedgeLabel(w: AncestorWedge) {
+  const mid = (w.a0 + w.a1) / 2
+  const rMid = (w.r0 + w.r1) / 2
+  return {
+    x: rMid * Math.cos(mid),
+    y: -rMid * Math.sin(mid),
+    rot: 90 - (mid * 180) / Math.PI,
+    // Arc length available for the label, so a cramped inner wedge can shrink.
+    arc: (w.a1 - w.a0) * rMid,
+  }
+}
+
+// The ego-centric radial chart: the focus person as a disc at the center,
+// ancestors as a nested wedge fan above (colored by ancestral branch), and
+// descendants fanning down as nodes — with couples' shared children collapsed
+// onto union junctions, so remarriage/adoption/multiple parents (which a fan
+// chart can't express) stay legible. Tap anyone to re-root the chart on them. It
 // shares the pan/zoom + fullscreen chrome with GraphCanvas (which hosts it), so
 // this component owns only the SVG body and its own control column.
 export default function RadialCanvas({
@@ -127,6 +170,65 @@ export default function RadialCanvas({
         aria-label="Radial family chart"
       >
         <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
+          {/* Ancestor fan: one filled wedge per ancestor, colored by branch. */}
+          {layout.wedges.map((w) => {
+            const n = nodeById.get(w.id)
+            if (!n) return null
+            const color =
+              LINEAGE_COLORS[
+                ((w.lineage % LINEAGE_COLORS.length) + LINEAGE_COLORS.length) %
+                  LINEAGE_COLORS.length
+              ]
+            const nonBio = Boolean(w.subtype && w.subtype !== 'biological')
+            const selected = w.id === selectedId
+            const isMe = meNodeId != null && w.id === meNodeId
+            const lbl = wedgeLabel(w)
+            const short = shortName(n)
+            const maxChars = Math.max(3, Math.floor(lbl.arc / 6.5))
+            const text =
+              short.length > maxChars ? `${short.slice(0, maxChars - 1)}…` : short
+            const ariaName = n.name || short
+            return (
+              <g
+                key={w.id}
+                onClick={() => activate(w.id)}
+                onKeyDown={(ev) => {
+                  if (ev.key === 'Enter' || ev.key === ' ') {
+                    ev.preventDefault()
+                    activate(w.id)
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={isMe ? `${ariaName} (you)` : ariaName}
+                aria-pressed={selected}
+                className="cursor-pointer"
+              >
+                <path
+                  d={wedgePath(w)}
+                  fill={color}
+                  fillOpacity={selected ? 0.55 : 0.28}
+                  // A dashed amber border marks a step/adoptive/foster link.
+                  stroke={isMe ? '#34d399' : nonBio ? '#fbbf24' : color}
+                  strokeOpacity={isMe || nonBio ? 0.9 : 0.65}
+                  strokeWidth={isMe ? 2 : 1}
+                  strokeDasharray={nonBio ? '4 3' : undefined}
+                />
+                <text
+                  x={lbl.x}
+                  y={lbl.y}
+                  transform={`rotate(${lbl.rot} ${lbl.x} ${lbl.y})`}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={11}
+                  fill="#f4f4f5"
+                >
+                  {text}
+                </text>
+              </g>
+            )
+          })}
+
           {layout.edges.map((e) => {
             const partner = e.relation === 'partner'
             const nonBio =
@@ -166,6 +268,8 @@ export default function RadialCanvas({
           ))}
 
           {layout.nodes.map((rn) => {
+            // The focus is drawn as a labelled center disc below, not here.
+            if (rn.role === 'focus') return null
             const n = nodeById.get(rn.id)
             if (!n) return null
             const selected = rn.id === selectedId
@@ -229,6 +333,44 @@ export default function RadialCanvas({
               </g>
             )
           })}
+
+          {/* The focus: a labelled disc at the center of the fan. */}
+          {(() => {
+            const f = nodeById.get(focusId)
+            if (!f) return null
+            const isMe = meNodeId != null && focusId === meNodeId
+            const short = shortName(f)
+            const text = short.length > 9 ? `${short.slice(0, 8)}…` : short
+            return (
+              <g
+                onClick={() => activate(focusId)}
+                onKeyDown={(ev) => {
+                  if (ev.key === 'Enter' || ev.key === ' ') {
+                    ev.preventDefault()
+                    activate(focusId)
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={isMe ? `${f.name} (you)` : f.name}
+                className="cursor-pointer"
+              >
+                {isMe && (
+                  <circle r={30} fill="none" stroke="#34d399" strokeWidth={2} />
+                )}
+                <circle r={27} fill="#f4f4f5" stroke="#fbbf24" strokeWidth={2} />
+                <text
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={12}
+                  fontWeight={600}
+                  fill="#18181b"
+                >
+                  {text}
+                </text>
+              </g>
+            )
+          })()}
         </g>
       </svg>
 

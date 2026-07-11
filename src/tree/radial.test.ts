@@ -12,13 +12,20 @@ const partner = (
   ended?: boolean,
 ): RadialInputEdge => ({ from, to, kind: 'partner', ended })
 
-function nodeMap(layout: ReturnType<typeof computeRadialLayout>) {
-  const m: Record<string, (typeof layout.nodes)[number]> = {}
+type Layout = ReturnType<typeof computeRadialLayout>
+
+function nodeMap(layout: Layout) {
+  const m: Record<string, Layout['nodes'][number]> = {}
   for (const n of layout.nodes) m[n.id] = n
   return m
 }
+function wedgeMap(layout: Layout) {
+  const m: Record<string, Layout['wedges'][number]> = {}
+  for (const w of layout.wedges) m[w.id] = w
+  return m
+}
 
-function minNodeDistance(layout: ReturnType<typeof computeRadialLayout>) {
+function minNodeDistance(layout: Layout) {
   const ns = layout.nodes
   let min = Infinity
   for (let i = 0; i < ns.length; i++) {
@@ -34,6 +41,7 @@ describe('computeRadialLayout', () => {
     const l = computeRadialLayout([], [], 'x')
     expect(l.nodes).toEqual([])
     expect(l.edges).toEqual([])
+    expect(l.wedges).toEqual([])
   })
 
   it('returns an empty layout when the focus is absent', () => {
@@ -64,50 +72,68 @@ describe('computeRadialLayout', () => {
     )
   })
 
-  it('fans ancestors upward (negative y) and descendants downward', () => {
-    const m = nodeMap(
-      computeRadialLayout(
-        ['me', 'mom', 'kid'],
-        [pc('mom', 'me'), pc('me', 'kid')],
-        'me',
-      ),
+  it('draws ancestors as wedges and descendants as nodes below', () => {
+    const l = computeRadialLayout(
+      ['me', 'mom', 'kid'],
+      [pc('mom', 'me'), pc('me', 'kid')],
+      'me',
     )
-    expect(m.mom.y).toBeLessThan(0) // ancestor → up
-    expect(m.mom.ring).toBe(-1)
-    expect(m.kid.y).toBeGreaterThan(0) // descendant → down
-    expect(m.kid.ring).toBe(1)
+    // Ancestor → a ring-1 wedge, not a node.
+    const w = wedgeMap(l)
+    expect(w.mom).toBeDefined()
+    expect(w.mom.ring).toBe(1)
+    expect(w.mom.r1).toBeGreaterThan(w.mom.r0)
+    expect(nodeMap(l).mom).toBeUndefined()
+    // Descendant → a node below the focus.
+    const kid = nodeMap(l).kid
+    expect(kid.y).toBeGreaterThan(0)
+    expect(kid.ring).toBe(1)
   })
 
-  it('keeps ancestors and descendants clear of overlap', () => {
-    const ids = ['me', 'mom', 'dad', 'gm', 'gf', 'kid1', 'kid2']
-    const edges = [
-      pc('mom', 'me'),
-      pc('dad', 'me'),
-      pc('gm', 'mom'),
-      pc('gf', 'mom'),
-      pc('me', 'kid1'),
-      pc('me', 'kid2'),
-    ]
-    expect(minNodeDistance(computeRadialLayout(ids, edges, 'me'))).toBeGreaterThan(
-      30,
+  it('subdivides a wedge among all parents when there are more than two', () => {
+    // Adoptive + two biological parents: three wedges share the focus's arc.
+    const ids = ['me', 'mom', 'dad', 'adopt']
+    const edges = [pc('mom', 'me'), pc('dad', 'me'), pc('adopt', 'me', 'adoptive')]
+    const l = computeRadialLayout(ids, edges, 'me')
+    const ring1 = l.wedges.filter((w) => w.ring === 1)
+    expect(ring1.length).toBe(3)
+    // Their arcs tile the fan without overlapping.
+    const sorted = [...ring1].sort((a, b) => a.a0 - b.a0)
+    for (let i = 1; i < sorted.length; i++) {
+      expect(sorted[i].a0).toBeGreaterThanOrEqual(sorted[i - 1].a1 - 1e-9)
+    }
+    // The non-biological parent keeps its subtype for styling.
+    expect(wedgeMap(l).adopt.subtype).toBe('adoptive')
+  })
+
+  it('sibling wedges at the same ring have disjoint arcs', () => {
+    const ids = ['me', 'mom', 'dad', 'gm', 'gf']
+    const edges = [pc('mom', 'me'), pc('dad', 'me'), pc('gm', 'mom'), pc('gf', 'mom')]
+    const l = computeRadialLayout(ids, edges, 'me')
+    const ring2 = l.wedges.filter((w) => w.ring === 2).sort((a, b) => a.a0 - b.a0)
+    expect(ring2.length).toBe(2)
+    expect(ring2[1].a0).toBeGreaterThanOrEqual(ring2[0].a1 - 1e-9)
+  })
+
+  it('gives each ancestral branch its own lineage color', () => {
+    const l = computeRadialLayout(
+      ['me', 'mom', 'dad'],
+      [pc('mom', 'me'), pc('dad', 'me')],
+      'me',
     )
+    const w = wedgeMap(l)
+    expect(w.mom.lineage).not.toBe(w.dad.lineage)
   })
 
   it('collapses a couple’s shared children onto one union junction', () => {
-    // Two parents, two shared kids: one union junction, not four parent edges.
     const ids = ['mom', 'dad', 'a', 'b']
     const edges = [pc('mom', 'a'), pc('dad', 'a'), pc('mom', 'b'), pc('dad', 'b')]
     const l = computeRadialLayout(ids, edges, 'mom')
-    // dad is the co-parent of both kids → a single union groups them.
-    const stems = l.edges.filter((e) => e.style === 'unionStem')
     expect(l.junctions.length).toBe(1)
-    // Each child hangs off the junction with a radial stem.
     expect(l.edges.filter((e) => e.style === 'radial').length).toBe(2)
-    expect(stems.length).toBeGreaterThan(0)
   })
 
   it('gives each remarriage its own union wedge', () => {
-    // One parent, two partners, a child by each → two distinct unions.
     const ids = ['p', 's1', 's2', 'c1', 'c2']
     const edges = [
       partner('p', 's1'),
@@ -120,7 +146,6 @@ describe('computeRadialLayout', () => {
     const l = computeRadialLayout(ids, edges, 'p')
     expect(l.junctions.length).toBe(2)
     const m = nodeMap(l)
-    // Both spouses and both children are on the descendant side.
     expect(m.c1.ring).toBe(1)
     expect(m.c2.ring).toBe(1)
     expect(m.s1).toBeDefined()
@@ -128,8 +153,7 @@ describe('computeRadialLayout', () => {
   })
 
   it('flags a non-biological child stem with its subtype', () => {
-    const ids = ['p', 'kid']
-    const l = computeRadialLayout(ids, [pc('p', 'kid', 'adoptive')], 'p')
+    const l = computeRadialLayout(['p', 'kid'], [pc('p', 'kid', 'adoptive')], 'p')
     const stem = l.edges.find(
       (e) => e.relation === 'parent_child' && e.style === 'radial',
     )
@@ -137,7 +161,6 @@ describe('computeRadialLayout', () => {
   })
 
   it('marks half-siblings of the focus', () => {
-    // me + halfSib share only mom; fullSib shares mom and dad.
     const ids = ['me', 'mom', 'dad', 'ofather', 'half', 'full']
     const edges = [
       pc('mom', 'me'),
@@ -157,31 +180,35 @@ describe('computeRadialLayout', () => {
   it('re-roots cleanly when the focus changes', () => {
     const ids = ['a', 'b', 'c']
     const edges = [pc('a', 'b'), pc('b', 'c')]
-    const fromA = nodeMap(computeRadialLayout(ids, edges, 'a'))
-    const fromC = nodeMap(computeRadialLayout(ids, edges, 'c'))
-    // Rooted at A, C is two generations of descendants down.
-    expect(fromA.c.ring).toBe(2)
-    // Rooted at C, A is two generations of ancestors up.
-    expect(fromC.a.ring).toBe(-2)
+    // Rooted at A, C is two generations of descendants down (a node at ring 2).
+    expect(nodeMap(computeRadialLayout(ids, edges, 'a')).c.ring).toBe(2)
+    // Rooted at C, A is two generations of ancestors up (a ring-2 wedge).
+    expect(wedgeMap(computeRadialLayout(ids, edges, 'c')).a.ring).toBe(2)
   })
 
   it('draws a partner with no shared children as a chord beside the focus', () => {
     const l = computeRadialLayout(['a', 'b'], [partner('a', 'b')], 'a')
-    const m = nodeMap(l)
-    expect(m.b.role).toBe('spouse')
+    expect(nodeMap(l).b.role).toBe('spouse')
     expect(l.edges.some((e) => e.relation === 'partner' && e.style === 'chord')).toBe(
       true,
     )
   })
 
+  it('keeps descendant nodes clear of overlap', () => {
+    const ids = ['me', 'k1', 'k2', 'k3', 'g1']
+    const edges = [pc('me', 'k1'), pc('me', 'k2'), pc('me', 'k3'), pc('k1', 'g1')]
+    expect(minNodeDistance(computeRadialLayout(ids, edges, 'me'))).toBeGreaterThan(
+      30,
+    )
+  })
+
   it('only shows people connected to the focus', () => {
-    // d/e are a separate family, unreachable from the focus.
     const l = computeRadialLayout(
       ['a', 'b', 'd', 'e'],
       [pc('a', 'b'), pc('d', 'e')],
       'a',
     )
-    const ids = l.nodes.map((n) => n.id)
+    const ids = [...l.nodes.map((n) => n.id), ...l.wedges.map((w) => w.id)]
     expect(ids).toContain('a')
     expect(ids).toContain('b')
     expect(ids).not.toContain('d')

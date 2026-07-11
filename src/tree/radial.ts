@@ -88,10 +88,29 @@ export interface RadialEdge {
   ended?: boolean
 }
 
+// An ancestor drawn as a filled arc segment (a fan-chart wedge) rather than a
+// node: adjacency is implied by nesting, so the ancestor half is dense and
+// crossing-free. Angles are math-convention (0 = right, π/2 = up); the renderer
+// flips y so the fan sweeps across the upper half. `lineage` groups a wedge into
+// one of the focus's ancestral branches for color-coding; `subtype` is the
+// parent→child relationship into the *inner* (child) person, so a step/adoptive
+// link can be styled distinctly.
+export interface AncestorWedge {
+  id: string
+  r0: number
+  r1: number
+  a0: number
+  a1: number
+  ring: number
+  lineage: number
+  subtype?: string
+}
+
 export interface RadialLayout {
   nodes: RadialNode[]
   edges: RadialEdge[]
   junctions: UnionJunction[]
+  wedges: AncestorWedge[]
   // Content bounding box, so the canvas can fit the whole chart in view.
   minX: number
   minY: number
@@ -99,20 +118,31 @@ export interface RadialLayout {
   height: number
 }
 
-// Radial distance between generations.
+// Radial distance between descendant generations (node side).
 const RING_GAP = 110
-// Fraction of a hemisphere the ancestor / descendant fans span (a sliver is
-// left at the horizontal so the two fans read as clearly separate).
+// Fraction of a hemisphere the descendant fan spans (a sliver is left at the
+// horizontal so it reads as clearly separate from the ancestor fan above).
 const HEMI_SPAN = Math.PI * 0.92
 // Where a family's union junction sits between a parent ring and the child ring.
 const JUNCTION_FRAC = 0.72
 // Where a married-in co-parent sits between their partner and the union — far
 // enough out that the focus's spouses don't pile onto the center.
 const SPOUSE_FRAC = 0.55
-// How far above the focus its siblings sit, and how wide they spread — a
-// fraction of a ring so they clear the focus and its label.
-const SIBLING_RING = RING_GAP * 0.42
+// Column spacing for the focus's siblings flanking the center.
 const SIBLING_SPREAD = RING_GAP * 0.62
+
+// Ancestor wedge geometry. The focus is a disc of radius CENTER_R; each ancestor
+// generation is a ring of thickness ANC_BAND outward from it, drawn across the
+// upper half (a small gap is left at the horizontal so the fan doesn't touch the
+// descendant side).
+const CENTER_R = 30
+const ANC_BAND = 52
+// A gap is left at the horizontal so the fan doesn't reach down onto the
+// siblings flanking the focus.
+const ANC_A0 = Math.PI * 0.08
+const ANC_A1 = Math.PI * 0.92
+// Fan depth cap (generations of ancestors drawn as wedges).
+const MAX_RING = 8
 // Depth cap so a data cycle can't recurse forever (mirrors layout.ts's cap).
 const MAX_DEPTH = 40
 
@@ -120,6 +150,7 @@ const EMPTY: RadialLayout = {
   nodes: [],
   edges: [],
   junctions: [],
+  wedges: [],
   minX: 0,
   minY: 0,
   width: 0,
@@ -212,15 +243,16 @@ export function computeRadialLayout(
     }
     return dfs
   }
-  const ancLeaves = leafMemo(new Map(), sortedParents)
   const descLeaves = leafMemo(new Map(), sortedChildren)
 
   const nodes: RadialNode[] = []
   const edgeList: RadialEdge[] = []
   const junctions: UnionJunction[] = []
+  const wedges: AncestorWedge[] = []
   const posOf = new Map<string, Point>()
   const placed = new Set<string>()
   let seq = 0
+  let lineageSeq = 0
 
   const place = (id: string, ring: number, angle: number, role: NodeRole, half?: boolean) => {
     const radius = Math.abs(ring) * RING_GAP
@@ -277,15 +309,11 @@ export function computeRadialLayout(
 
   const focusPoint = place(focusId, 0, Math.PI / 2, 'focus')
 
-  // --- Ancestors (upper hemisphere), plus the focus's siblings --------------
-  placeAncestors(
-    focusId,
-    focusPoint,
-    0,
-    Math.PI / 2 - HEMI_SPAN / 2,
-    Math.PI / 2 + HEMI_SPAN / 2,
-    true,
-  )
+  // --- Ancestors: a fan of nested wedges across the upper half --------------
+  wedgeAncestors(focusId, 1, ANC_A0, ANC_A1, -1)
+
+  // --- The focus's siblings: nodes flanking the center, sharing the fan above
+  placeFocusSiblings()
 
   // --- Descendants (lower hemisphere), plus the focus's spouses -------------
   placeDescendants(
@@ -315,66 +343,70 @@ export function computeRadialLayout(
 
   // ------------------------------------------------------------------------
 
-  // Place `childId`'s parents outward into [aStart, aEnd]. When `withSiblings`
-  // (the focus only), the focus's siblings hang off the same parent-union so
-  // shared-parent edges collapse and siblings sit beside the focus.
-  function placeAncestors(
+  // Draw `childId`'s parents as nested wedges filling the arc [a0, a1] one ring
+  // out, recursing outward. A person with >2 parents just subdivides their arc
+  // among all of them (the fan goes locally non-binary — honest for adoption /
+  // multiple parents). `lineage` colors a whole ancestral branch: a fresh id is
+  // minted for each parent and grandparent (giving the classic up-to-four-color
+  // fan), and inherited further out.
+  function wedgeAncestors(
     childId: string,
-    childPoint: Point,
-    childRing: number,
-    aStart: number,
-    aEnd: number,
-    withSiblings: boolean,
+    ring: number,
+    a0: number,
+    a1: number,
+    lineage: number,
   ) {
-    if (childRing <= -MAX_DEPTH) return
+    if (ring > MAX_RING) return
     const ps = sortedParents(childId).filter((p) => !placed.has(p))
-    const siblings = withSiblings ? focusSiblings() : []
-    if (ps.length === 0) {
-      // No parents to branch to, but the focus may still have siblings via a
-      // parent that's already placed — skip; siblings need a parent-union.
-      return
-    }
+    if (ps.length === 0) return
 
-    const parentRing = childRing - 1
-    // Collapse to a junction when it saves edges: ≥2 parents, or siblings share
-    // it. A lone parent with no siblings is just a straight spoke.
-    const useJunction = ps.length >= 2 || siblings.length > 0
-    let hub: Point = childPoint
-    if (useJunction) {
-      const jr = (Math.abs(childRing) + JUNCTION_FRAC) * RING_GAP
-      const j = addJunction(polar(jr, (aStart + aEnd) / 2))
-      hub = { x: j.x, y: j.y }
-      addEdge(hub, childPoint, 'unionStem', 'parent_child')
-      // Siblings flank the focus, hanging off the shared parent-union.
-      siblings.forEach((s, i) => {
-        const side = i % 2 === 0 ? -1 : 1
-        const step = Math.floor(i / 2) + 1
-        const sp = placeAt(
-          s.id,
-          { x: side * step * SIBLING_SPREAD, y: -SIBLING_RING },
-          0,
-          Math.PI / 2,
-          'sibling',
-          s.half,
-        )
-        addEdge(hub, sp, 'unionStem', 'parent_child')
-      })
-    }
-
-    const weights = ps.map((p) => ancLeaves(p))
-    const total = weights.reduce((a, b) => a + b, 0) || ps.length
-    let cursor = aStart
-    ps.forEach((pid, i) => {
-      const span = ((aEnd - aStart) * weights[i]) / total
-      const mid = cursor + span / 2
-      const pp = place(pid, parentRing, mid, 'ancestor')
-      const bio = isBiological(pid, childId)
-      addEdge(pp, hub, useJunction ? 'unionStem' : 'radial', 'parent_child', {
+    const r0 = CENTER_R + (ring - 1) * ANC_BAND
+    const r1 = CENTER_R + ring * ANC_BAND
+    // Split the arc equally among parents — the classic symmetric fan, where
+    // every ancestor slot is the same width regardless of how much of its branch
+    // is known (unknown branches simply leave their outer wedge empty). With >2
+    // parents the arc just divides into that many equal slices.
+    const span = (a1 - a0) / ps.length
+    let cursor = a0
+    ps.forEach((pid) => {
+      const start = cursor
+      const end = cursor + span
+      // Fresh lineage color per parent (ring 1) and per grandparent (ring 2);
+      // deeper ancestors inherit their grandparent's color.
+      const lin = ring <= 2 ? lineageSeq++ : lineage
+      placed.add(pid)
+      wedges.push({
+        id: pid,
+        r0,
+        r1,
+        a0: start,
+        a1: end,
+        ring,
+        lineage: lin,
         subtype: pcSubtype(pid, childId),
-        curve: !bio && !useJunction,
       })
-      placeAncestors(pid, pp, parentRing, cursor, cursor + span, false)
-      cursor += span
+      wedgeAncestors(pid, ring + 1, start, end, lin)
+      cursor = end
+    })
+  }
+
+  // The focus's siblings sit as nodes flanking the center on the horizontal —
+  // clear of the ancestor fan above and the descendant fan below — tied to the
+  // focus by a light stem (they share the parents drawn in the fan). Half-
+  // siblings are flagged so the renderer can mark them.
+  function placeFocusSiblings() {
+    focusSiblings().forEach((s, i) => {
+      const side = i % 2 === 0 ? -1 : 1
+      const col = Math.floor(i / 2)
+      const sp = placeAt(
+        s.id,
+        { x: side * (CENTER_R + 30 + col * SIBLING_SPREAD), y: RING_GAP * 0.12 },
+        0,
+        side < 0 ? Math.PI : 0,
+        'sibling',
+        s.half,
+      )
+      addEdge(focusPoint, sp, 'unionStem', 'parent_child')
     })
   }
 
@@ -535,6 +567,18 @@ export function computeRadialLayout(
     }
     for (const n of nodes) consider(n.x, n.y)
     for (const j of junctions) consider(j.x, j.y)
+    // A wedge's extent is its outer arc, which can bulge past its corners where
+    // it crosses an axis — sample the corners plus any axis angle inside [a0,a1].
+    for (const w of wedges) {
+      const angles = [w.a0, w.a1]
+      for (const ax of [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2]) {
+        if (ax >= w.a0 && ax <= w.a1) angles.push(ax)
+      }
+      for (const a of angles) {
+        const p = polar(w.r1, a)
+        consider(p.x, p.y)
+      }
+    }
     if (!Number.isFinite(minX)) {
       minX = 0
       minY = 0
@@ -545,6 +589,7 @@ export function computeRadialLayout(
       nodes,
       edges: edgeList,
       junctions,
+      wedges,
       minX,
       minY,
       width: maxX - minX,
