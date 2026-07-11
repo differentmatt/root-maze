@@ -358,8 +358,11 @@ export function computeRadialLayout(
       const uSpan = ((a1 - a0) * weightOf(u.children)) / total
 
       // Spouse band: name the married-in co-parent(s) at the base of the block.
-      for (const co of u.coParents) {
-        if (placed.has(co)) continue
+      // Each unplaced co-parent gets an equal slice of the union's arc so their
+      // bands don't overlap and each remains individually selectable.
+      const unplacedCo = u.coParents.filter((co) => !placed.has(co))
+      const coSpan = unplacedCo.length > 0 ? uSpan / unplacedCo.length : 0
+      unplacedCo.forEach((co, ci) => {
         placed.add(co)
         const meta = partnerMeta.get(pairKey(parentId, co))
         wedges.push({
@@ -367,12 +370,12 @@ export function computeRadialLayout(
           kind: 'spouse',
           r0,
           r1: r0 + SPOUSE_BAND,
-          a0: cursor,
-          a1: cursor + uSpan,
+          a0: cursor + ci * coSpan,
+          a1: cursor + (ci + 1) * coSpan,
           ring,
           ended: meta?.ended,
         })
-      }
+      })
       const bandInset = u.coParents.length > 0 ? SPOUSE_BAND + 2 : 0
 
       // Children across the union's block, weighted by their own descent size.
@@ -411,8 +414,9 @@ export function computeRadialLayout(
     coParents: string[]
     children: string[]
   }[] {
-    // Keep already-placed children too, so a cross-link (a child reached a
-    // second way) can still draw a chord back to where they sit.
+    // Include already-placed children so union grouping and co-parent keys are
+    // accurate even when a child was first reached via a different path; placed
+    // children are filtered out before wedges are emitted.
     const kids = sortedChildren(parentId)
     const groups = new Map<string, { coParents: string[]; children: string[] }>()
     const order: string[] = []

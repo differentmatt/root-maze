@@ -87,7 +87,7 @@ describe('computeRadialLayout', () => {
     expect(wedgeMap(l).adopt.subtype).toBe('adoptive')
   })
 
-  it('sibling wedges at the same ring have disjoint arcs', () => {
+  it('ancestor wedges at the same ring have disjoint arcs', () => {
     const ids = ['me', 'mom', 'dad', 'gm', 'gf']
     const edges = [pc('mom', 'me'), pc('dad', 'me'), pc('gm', 'mom'), pc('gf', 'mom')]
     const l = computeRadialLayout(ids, edges, 'me')
