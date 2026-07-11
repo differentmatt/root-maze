@@ -9,7 +9,7 @@ vi.mock('../lib/dynamo.js', () => ({
 // appendLog writes to the log via dynamo; stub it so node tests stay focused.
 vi.mock('../lib/groups.js', () => ({ appendLog: vi.fn() }))
 
-import { getItem, putItem, queryPrefix } from '../lib/dynamo.js'
+import { getItem, putItem, queryPrefix, queryAll } from '../lib/dynamo.js'
 import { appendLog } from '../lib/groups.js'
 import {
   listNodes,
@@ -24,19 +24,22 @@ beforeEach(() => {
   vi.mocked(getItem).mockReset()
   vi.mocked(putItem).mockReset().mockResolvedValue(true)
   vi.mocked(queryPrefix).mockReset().mockResolvedValue([])
+  // listNodes paginates via queryAll; default it to empty so unrelated tests
+  // don't depend on a stray return value.
+  vi.mocked(queryAll).mockReset().mockResolvedValue([])
   vi.mocked(appendLog).mockReset().mockResolvedValue(undefined)
 })
 
 describe('listNodes', () => {
   it('drops soft-deleted rows and projects to the public shape', async () => {
-    vi.mocked(queryPrefix).mockResolvedValueOnce([
+    vi.mocked(queryAll).mockResolvedValueOnce([
       { nodeId: 'nod_1', groupId: 'g1', name: 'Ada', PK: 'x', SK: 'y', deletedAt: null },
       { nodeId: 'nod_2', groupId: 'g1', name: 'Gone', deletedAt: '2026-01-01' },
     ])
 
     const nodes = await listNodes('g1')
 
-    expect(queryPrefix).toHaveBeenCalledWith('GROUP#g1', 'NODE#')
+    expect(queryAll).toHaveBeenCalledWith('GROUP#g1', 'NODE#')
     expect(nodes).toHaveLength(1)
     expect(nodes[0]).toMatchObject({ nodeId: 'nod_1', name: 'Ada' })
     // No storage internals leak to callers.

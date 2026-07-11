@@ -31,7 +31,12 @@ describe('gedcom api', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await commitImport('grp_1', '0 HEAD', {
-      '@I1@': { action: 'merge', nodeId: 'nod_1', overwrite: ['birthdate'] },
+      '@I1@': {
+        action: 'merge',
+        nodeId: 'nod_1',
+        overwrite: ['birthdate'],
+        updatedAt: '2024-01-01T00:00:00.000Z',
+      },
     })
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/groups/grp_1/import/commit')
@@ -41,6 +46,7 @@ describe('gedcom api', () => {
       action: 'merge',
       nodeId: 'nod_1',
       overwrite: ['birthdate'],
+      updatedAt: '2024-01-01T00:00:00.000Z',
     })
   })
 

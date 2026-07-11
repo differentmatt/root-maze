@@ -9,7 +9,7 @@ vi.mock('../lib/dynamo.js', () => ({
 vi.mock('../lib/groups.js', () => ({ appendLog: vi.fn() }))
 vi.mock('../lib/nodes.js', () => ({ getNode: vi.fn() }))
 
-import { getItem, putItem, queryPrefix } from '../lib/dynamo.js'
+import { getItem, putItem, queryPrefix, queryAll } from '../lib/dynamo.js'
 import { appendLog } from '../lib/groups.js'
 import { getNode } from '../lib/nodes.js'
 import {
@@ -26,6 +26,8 @@ beforeEach(() => {
   vi.mocked(getItem).mockReset()
   vi.mocked(putItem).mockReset().mockResolvedValue(true)
   vi.mocked(queryPrefix).mockReset().mockResolvedValue([])
+  // listEdges paginates via queryAll; default it to empty.
+  vi.mocked(queryAll).mockReset().mockResolvedValue([])
   vi.mocked(appendLog).mockReset().mockResolvedValue(undefined)
   vi.mocked(getNode).mockReset()
 })
@@ -125,7 +127,7 @@ describe('createEdge', () => {
 
 describe('listEdges', () => {
   it('drops soft-deleted edges and projects the public shape', async () => {
-    vi.mocked(queryPrefix).mockResolvedValueOnce([
+    vi.mocked(queryAll).mockResolvedValueOnce([
       {
         edgeId: 'edg_1', groupId: 'g1', edgeKind: 'partner', fromPerson: 'a',
         toPerson: 'b', subtype: 'married', PK: 'x', SK: 'y', deletedAt: null,

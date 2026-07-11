@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react'
 import ImportExport from './ImportExport'
 
 vi.mock('../api', async (importOriginal) => ({
@@ -147,7 +147,10 @@ describe('ImportExport review flow', () => {
     pickFile(/Import GEDCOM into this group/, '0 HEAD')
     await screen.findByText('Review import')
 
-    fireEvent.click(screen.getByRole('button', { name: /^skip$/i }))
+    // Scope to the matched person's row (both matched and fresh rows now have
+    // their own "skip" button).
+    const matchedRow = screen.getByText(/↔ existing/).closest('div')!
+    fireEvent.click(within(matchedRow).getByRole('button', { name: /^skip$/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
 
     await waitFor(() => expect(commitImport).toHaveBeenCalled())
@@ -169,15 +172,10 @@ describe('ImportExport review flow', () => {
     pickFile(/Import GEDCOM into this group/, '0 HEAD')
     await screen.findByText('Review import')
 
-    // The fresh person row has an "Add" (create) and "skip" button.
-    const skipButtons = screen.getAllByRole('button', { name: /^skip$/i })
-    // There should be a skip button for both the matched person and the fresh person.
-    expect(skipButtons.length).toBeGreaterThanOrEqual(1)
-    // Click the skip button associated with the fresh person (New Person row).
-    const freshPersonRow = screen.getByText('New Person').closest('div')!
-    const skipBtn = freshPersonRow.querySelector('button[class*="text-zinc"]')
-    // Use the second skip button (index 1) for the fresh row.
-    fireEvent.click(skipButtons[skipButtons.length - 1])
+    // Click Skip on the fresh person's own row (scoped, so we don't rely on
+    // button ordering across the matched + fresh sections).
+    const freshRow = screen.getByText('New Person').closest('div')!
+    fireEvent.click(within(freshRow).getByRole('button', { name: /^skip$/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
 
     await waitFor(() => expect(commitImport).toHaveBeenCalled())

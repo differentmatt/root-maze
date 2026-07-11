@@ -455,8 +455,9 @@ function NewGroupFromFile({
       setStatus({ error: err instanceof Error ? err.message : 'Import failed' })
       // If the group was already persisted but the import failed, hand it back
       // to the workspace so the user can see and manage the (possibly partial)
-      // group rather than losing it entirely.
-      if (group) await onCreated(group).catch(() => {})
+      // group rather than losing it entirely. onCreated may return void or a
+      // promise, so normalize before catching its failure.
+      if (group) await Promise.resolve(onCreated(group)).catch(() => {})
     }
   }
 
