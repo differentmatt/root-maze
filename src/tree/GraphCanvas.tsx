@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PersonNode, Edge } from '../api'
 import { computeLayout, neighborhood, type LayoutEdge } from './layout'
+import { usePanZoom, type View } from './panzoom'
+import RadialCanvas from './RadialCanvas'
 import { labelFor } from './names'
 
-// The graph can be viewed two ways. 'tree' lays out the whole family by
-// generation; 'focus' shows just one person's nearby relatives, which keeps a
-// large tree legible on a small screen. The layout engine is the same for both
-// — 'focus' simply runs it over a bounded neighborhood.
-type ViewMode = 'tree' | 'focus'
+// The graph can be viewed three ways. 'tree' lays out the whole family by
+// generation; 'focus' shows just one person's nearby relatives (same layered
+// engine over a bounded neighborhood), which keeps a large tree legible on a
+// small screen; 'radial' is an ego-centric fan chart (its own engine) that
+// centers on one person and fans ancestors up / descendants down — the shape
+// that fills a portrait phone screen and stays readable for messy families.
+type ViewMode = 'tree' | 'focus' | 'radial'
 // How many relationship-hops out the focus view reaches from its center.
 const FOCUS_DEPTH = 3
 
@@ -25,12 +29,6 @@ const MAX_K = 4
 const NODE_R = 18
 // Padding (in viewport units) around the tree when fit into view.
 const FIT_PAD = 32
-
-interface View {
-  x: number
-  y: number
-  k: number
-}
 
 // Renders the family graph as a pan/zoom SVG network: parent→child edges are
 // directed (blue, a small arrowhead just off the child); partner edges are
@@ -57,19 +55,10 @@ export default function GraphCanvas({
   meNodeId?: string | null
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
-  const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 })
   const [mode, setMode] = useState<ViewMode>('tree')
-  // Who the focus view centers on. Null until the user picks someone (or has a
-  // claimed "me" node), at which point it defaults sensibly below.
+  // Who the focus/radial views center on. Null until the user picks someone (or
+  // has a claimed "me" node), at which point it defaults sensibly below.
   const [focusId, setFocusId] = useState<string | null>(null)
-
-  // Active pointers, so we can tell a one-finger pan from a two-finger pinch.
-  const pointers = useRef<Map<number, { x: number; y: number }>>(new Map())
-  // Track in client (screen) coords so pan deltas are computed independently of
-  // view.k — the SVG CTM converts to user space without including the <g> transform.
-  const lastPan = useRef<{ x: number; y: number } | null>(null)
-  const pinchDist = useRef<number | null>(null)
-  const moved = useRef(false)
 
   const layoutEdges: LayoutEdge[] = useMemo(
     () =>
@@ -165,6 +154,9 @@ export default function GraphCanvas({
   // fits the whole tree, so the user can always reach a full view.
   const minZoom = Math.min(MIN_K, wholeFitK)
 
+  // Pan/zoom + gesture handling is shared with RadialCanvas via this hook.
+  const { view, setView, handlers, moved } = usePanZoom(svgRef, minZoom, MAX_K)
+
   // A view (pan/zoom) that fits a content box of size cw×ch, centered on the
   // point (cx, cy), into the viewport — clamped to the zoom range.
   const viewFitting = useCallback(
@@ -228,7 +220,7 @@ export default function GraphCanvas({
   // pan/zoom is preserved between these changes.
   useEffect(() => {
     setView(mode === 'focus' ? focusView() : fitView())
-  }, [mode, focusView, fitView])
+  }, [mode, focusView, fitView, setView])
 
   // Also re-frame when entering or leaving fullscreen, so a graph the user had
   // zoomed into doesn't open fullscreen still zoomed in (which pushes the
@@ -238,41 +230,6 @@ export default function GraphCanvas({
     setView(mode === 'focus' ? focusView() : fitView())
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFull])
-
-  // Map client (screen) coordinates to SVG user space via the <svg>'s own CTM,
-  // which is independent of our pan/zoom transform — so deltas stay stable.
-  const toUser = useCallback((clientX: number, clientY: number) => {
-    const svg = svgRef.current
-    const ctm = svg?.getScreenCTM()
-    if (!svg || !ctm) return { x: 0, y: 0 }
-    const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse())
-    return { x: p.x, y: p.y }
-  }, [])
-
-  const zoomAround = useCallback(
-    (clientX: number, clientY: number, factor: number) => {
-      const q = toUser(clientX, clientY)
-      setView((v) => {
-        const k = Math.min(MAX_K, Math.max(minZoom, v.k * factor))
-        const f = k / v.k
-        return { k, x: q.x - f * (q.x - v.x), y: q.y - f * (q.y - v.y) }
-      })
-    },
-    [toUser, minZoom],
-  )
-
-  // Wheel must be a non-passive native listener so preventDefault() can stop
-  // the page from scrolling while zooming.
-  useEffect(() => {
-    const svg = svgRef.current
-    if (!svg) return
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault()
-      zoomAround(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1)
-    }
-    svg.addEventListener('wheel', onWheel, { passive: false })
-    return () => svg.removeEventListener('wheel', onWheel)
-  }, [zoomAround])
 
   // "Fullscreen" is a CSS overlay rather than the native Fullscreen API, which
   // iOS Safari doesn't support for arbitrary elements. While open, lock body
@@ -289,53 +246,6 @@ export default function GraphCanvas({
       document.removeEventListener('keydown', onKey)
     }
   }, [isFull, onFullscreenChange])
-
-  function onPointerDown(e: React.PointerEvent) {
-    svgRef.current?.setPointerCapture(e.pointerId)
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-    moved.current = false
-    if (pointers.current.size === 1) {
-      lastPan.current = { x: e.clientX, y: e.clientY }
-    } else if (pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()]
-      pinchDist.current = Math.hypot(a.x - b.x, a.y - b.y)
-      lastPan.current = null
-    }
-  }
-
-  function onPointerMove(e: React.PointerEvent) {
-    if (!pointers.current.has(e.pointerId)) return
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
-
-    if (pointers.current.size >= 2 && pinchDist.current != null) {
-      const [a, b] = [...pointers.current.values()]
-      const dist = Math.hypot(a.x - b.x, a.y - b.y)
-      if (pinchDist.current > 0) {
-        zoomAround((a.x + b.x) / 2, (a.y + b.y) / 2, dist / pinchDist.current)
-      }
-      pinchDist.current = dist
-      moved.current = true
-    } else if (pointers.current.size === 1 && lastPan.current) {
-      const screenDx = e.clientX - lastPan.current.x
-      const screenDy = e.clientY - lastPan.current.y
-      if (Math.abs(screenDx) + Math.abs(screenDy) > 4) moved.current = true
-      const q = toUser(e.clientX, e.clientY)
-      const prev = toUser(lastPan.current.x, lastPan.current.y)
-      setView((v) => ({ ...v, x: v.x + (q.x - prev.x), y: v.y + (q.y - prev.y) }))
-      lastPan.current = { x: e.clientX, y: e.clientY }
-    }
-  }
-
-  function onPointerUp(e: React.PointerEvent) {
-    pointers.current.delete(e.pointerId)
-    if (pointers.current.size < 2) pinchDist.current = null
-    if (pointers.current.size === 1) {
-      const [p] = [...pointers.current.values()]
-      lastPan.current = { x: p.x, y: p.y }
-    } else if (pointers.current.size === 0) {
-      lastPan.current = null
-    }
-  }
 
   // Activate a person: select them and, in focus mode, re-center the view on
   // them so the graph becomes a way to walk the family one relative at a time.
@@ -356,6 +266,12 @@ export default function GraphCanvas({
     setMode('focus')
   }
 
+  // Enter the radial view rooted on the current selection (or the "me" node).
+  function enterRadial() {
+    setFocusId(selectedId ?? meNodeId ?? null)
+    setMode('radial')
+  }
+
   if (nodes.length === 0) {
     return (
       <div className="flex h-64 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 text-sm text-zinc-500">
@@ -372,14 +288,25 @@ export default function GraphCanvas({
           : 'relative'
       }
     >
+      {mode === 'radial' && (
+        <RadialCanvas
+          nodes={nodes}
+          edges={edges}
+          focusId={effectiveFocus ?? nodes[0].nodeId}
+          onFocus={setFocusId}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          meNodeId={meNodeId}
+          isFull={isFull}
+          onFullscreenChange={onFullscreenChange}
+        />
+      )}
+      {mode !== 'radial' && (
       <svg
         ref={svgRef}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         preserveAspectRatio="xMidYMid meet"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
+        {...handlers}
         className={`touch-none rounded-lg border border-zinc-800 bg-zinc-900 ${
           isFull ? 'h-full w-full' : 'h-auto w-full'
         }`}
@@ -500,6 +427,21 @@ export default function GraphCanvas({
           })}
         </g>
       </svg>
+      )}
+
+      {mode !== 'radial' && (
+        <div className="absolute right-2 top-2 flex flex-col gap-1">
+          <ControlButton label="Fit to view" onClick={() => setView(fitView())}>
+            ⌾
+          </ControlButton>
+          <ControlButton
+            label={isFull ? 'Exit fullscreen' : 'Fullscreen'}
+            onClick={() => onFullscreenChange(!isFull)}
+          >
+            {isFull ? '×' : '⤢'}
+          </ControlButton>
+        </div>
+      )}
 
       <div
         role="group"
@@ -507,23 +449,14 @@ export default function GraphCanvas({
         className="absolute left-2 top-2 flex overflow-hidden rounded-md border border-zinc-700 bg-zinc-900/90 text-xs"
       >
         <ModeButton active={mode === 'tree'} onClick={() => setMode('tree')}>
-          Whole tree
+          Tree
         </ModeButton>
         <ModeButton active={mode === 'focus'} onClick={enterFocus}>
           Focus
         </ModeButton>
-      </div>
-
-      <div className="absolute right-2 top-2 flex flex-col gap-1">
-        <ControlButton label="Fit to view" onClick={() => setView(fitView())}>
-          ⌾
-        </ControlButton>
-        <ControlButton
-          label={isFull ? 'Exit fullscreen' : 'Fullscreen'}
-          onClick={() => onFullscreenChange(!isFull)}
-        >
-          {isFull ? '×' : '⤢'}
-        </ControlButton>
+        <ModeButton active={mode === 'radial'} onClick={enterRadial}>
+          Radial
+        </ModeButton>
       </div>
     </div>
   )

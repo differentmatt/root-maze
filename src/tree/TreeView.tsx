@@ -240,12 +240,18 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
               Views
             </h3>
             <p>
-              <span className="text-zinc-100">Whole tree</span> — everyone, laid
-              out by generation.
+              <span className="text-zinc-100">Tree</span> — everyone, laid out
+              by generation.
             </p>
             <p>
               <span className="text-zinc-100">Focus</span> — zoom in on one
               person and their close family; tap anyone to re-center on them.
+            </p>
+            <p>
+              <span className="text-zinc-100">Radial</span> — one person at the
+              center, ancestors fanning up and descendants fanning down; tap
+              anyone to re-root the chart on them. Best for large or complex
+              families on a phone.
             </p>
           </section>
 
@@ -294,8 +300,20 @@ function Legend() {
         <span className="inline-block h-0.5 w-5 bg-rose-400" /> partner
       </span>
       <span className="flex items-center gap-1.5">
+        <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-amber-400" />{' '}
+        adopted / step
+      </span>
+      <span className="flex items-center gap-1.5">
         <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-zinc-400" />{' '}
         ended
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-2 w-2 rounded-full bg-zinc-500" /> family
+        (shared parents)
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block h-3 w-3 rounded-full border-2 border-dashed border-zinc-400" />{' '}
+        half-sibling
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-3 w-3 rounded-full border-2 border-emerald-400" />{' '}
