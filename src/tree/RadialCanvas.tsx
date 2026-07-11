@@ -88,17 +88,27 @@ function labelLayout(w: Wedge, name: string): LabelLayout {
     return { curved: false, x: rc * Math.cos(mid), y: -rc * Math.sin(mid), rot, fontSize, text }
   }
 
-  // Curved: an arc at mid-radius spanning the wedge. On the upper half draw it
-  // right-to-left (sweep 1) so the text runs left-to-right upright; on the lower
-  // half draw left-to-right (sweep 0) so it isn't upside down.
+  // Curved: an arc spanning the wedge. On the upper half draw it right-to-left
+  // (sweep 1) so the text runs left-to-right upright; on the lower half draw
+  // left-to-right (sweep 0) so it isn't upside down.
+  //
+  // The text hangs off its *alphabetic* baseline, and WebKit/iOS Safari ignore
+  // dominant-baseline on a textPath — so rather than rely on it, we offset the
+  // path radius by ~⅓ of the font toward the text's descent side. That lands the
+  // glyph body centered across the band on every browser. (Glyphs ascend outward
+  // on the upper half, inward on the lower half.)
   const rMid = (w.r0 + w.r1) / 2
+  const rPath = rMid + (upperHalf(mid) ? -1 : 1) * fontSize * 0.34
   const pt = (a: number) =>
-    `${(rMid * Math.cos(a)).toFixed(2)} ${(-rMid * Math.sin(a)).toFixed(2)}`
-  const upper = Math.sin(mid) > 0
-  const path = upper
-    ? `M ${pt(w.a1)} A ${rMid} ${rMid} 0 0 1 ${pt(w.a0)}`
-    : `M ${pt(w.a0)} A ${rMid} ${rMid} 0 0 0 ${pt(w.a1)}`
+    `${(rPath * Math.cos(a)).toFixed(2)} ${(-rPath * Math.sin(a)).toFixed(2)}`
+  const path = upperHalf(mid)
+    ? `M ${pt(w.a1)} A ${rPath} ${rPath} 0 0 1 ${pt(w.a0)}`
+    : `M ${pt(w.a0)} A ${rPath} ${rPath} 0 0 0 ${pt(w.a1)}`
   return { curved: true, path, fontSize, text }
+}
+
+function upperHalf(mid: number): boolean {
+  return Math.sin(mid) > 0
 }
 
 // A DOM-id-safe suffix for a wedge's label path.
@@ -287,11 +297,10 @@ export default function RadialCanvas({
                 {lbl.curved ? (
                   <>
                     <path id={labelPathId(w.id)} d={lbl.path} fill="none" />
-                    <text
-                      fontSize={lbl.fontSize}
-                      dominantBaseline="central"
-                      fill={spouse ? '#fecdd3' : '#f4f4f5'}
-                    >
+                    {/* No dominant-baseline: the path radius is offset so the
+                        alphabetic baseline centers the text across the band on
+                        every browser (WebKit ignores dominant-baseline here). */}
+                    <text fontSize={lbl.fontSize} fill={spouse ? '#fecdd3' : '#f4f4f5'}>
                       <textPath
                         href={`#${labelPathId(w.id)}`}
                         startOffset="50%"
