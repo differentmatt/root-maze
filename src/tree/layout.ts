@@ -317,6 +317,73 @@ function orderRows(
       reindex()
     }
   }
+
+  // Keep partners adjacent with the multi-partner person in the middle.
+  // Barycenter alone can leave a partner stranded on the far side of the row
+  // (e.g. next to a spouse's siblings), making the straight partner edge cross
+  // the in-between people. For a degree-two chain (a–b–c), b must sit between
+  // a and c so neither partner edge crosses the other. For more than two
+  // partners pairwise adjacency is impossible, so the hub is centred in the
+  // partner group with its partners split evenly on each side (best-effort).
+  for (const r of rowKeys) {
+    const row = rows.get(r)!
+    const inRow = new Set(row)
+
+    // Build partner-connected groups within this row via BFS, in the order
+    // their first member appears in the barycenter-sorted row.
+    const groupOf = new Map<string, number>()
+    const groups: string[][] = []
+    for (const id of row) {
+      if (groupOf.has(id)) continue
+      const gIdx = groups.length
+      const g: string[] = []
+      groups.push(g)
+      const queue = [id]
+      groupOf.set(id, gIdx)
+      while (queue.length) {
+        const cur = queue.shift()!
+        g.push(cur)
+        for (const pn of partners.get(cur)!) {
+          if (inRow.has(pn) && !groupOf.has(pn)) {
+            groupOf.set(pn, gIdx)
+            queue.push(pn)
+          }
+        }
+      }
+    }
+
+    // Order each partner group: find the hub (highest partner-degree within
+    // the group) and place them in the middle. For a simple pair the BFS order
+    // already reflects the barycenter ranking, so it is left unchanged.
+    const orderedGroups = groups.map((g) => {
+      if (g.length < 3) return g
+      const inGroup = new Set(g)
+      let hub = g[0]
+      let maxDeg = 0
+      for (const id of g) {
+        const deg = partners.get(id)!.filter((p) => inGroup.has(p)).length
+        if (deg > maxDeg) {
+          maxDeg = deg
+          hub = id
+        }
+      }
+      const others = g.filter((id) => id !== hub)
+      const half = Math.floor(others.length / 2)
+      return [...others.slice(0, half), hub, ...others.slice(half)]
+    })
+
+    // Emit groups in the order their first barycenter-sorted member appears.
+    const emitted = new Set<number>()
+    const ordered: string[] = []
+    for (const id of row) {
+      const gi = groupOf.get(id)!
+      if (emitted.has(gi)) continue
+      emitted.add(gi)
+      ordered.push(...orderedGroups[gi])
+    }
+    rows.set(r, ordered)
+  }
+  reindex()
 }
 
 // Assign an x to every person: pull each toward the average x of their

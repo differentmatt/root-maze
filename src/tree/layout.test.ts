@@ -67,6 +67,72 @@ describe('computeLayout', () => {
     expect(pos.a.y).toBe(pos.b.y)
   })
 
+  it('keeps a couple adjacent so the partner edge never crosses siblings', () => {
+    // Two parents with several children; one child has a partner. The partner
+    // must sit next to their spouse, not on the far side of the spouse's
+    // siblings — otherwise the straight partner edge is drawn through the
+    // in-between siblings and reads as if they were the partners.
+    const ids = ['mom', 'dad', 'me', 'sibA', 'sibB', 'sibC', 'spouse']
+    const edges: LayoutEdge[] = [
+      partner('mom', 'dad'),
+      pc('mom', 'me'),
+      pc('dad', 'me'),
+      pc('mom', 'sibA'),
+      pc('dad', 'sibA'),
+      pc('mom', 'sibB'),
+      pc('dad', 'sibB'),
+      pc('mom', 'sibC'),
+      pc('dad', 'sibC'),
+      partner('me', 'spouse'),
+    ]
+    const { pos } = computeLayout(ids, edges)
+    // Same row (same generation).
+    expect(pos.spouse.y).toBe(pos.me.y)
+    // No sibling sits horizontally between 'me' and 'spouse'.
+    const lo = Math.min(pos.me.x, pos.spouse.x)
+    const hi = Math.max(pos.me.x, pos.spouse.x)
+    for (const sib of ['sibA', 'sibB', 'sibC']) {
+      const between = pos[sib].x > lo && pos[sib].x < hi
+      expect(between).toBe(false)
+    }
+  })
+
+  it('places a remarried person between their two partners', () => {
+    // b is partnered with both a and c (a degree-two chain).
+    // b must sit between a and c so neither partner edge crosses the other.
+    const ids = ['a', 'b', 'c']
+    const edges: LayoutEdge[] = [partner('a', 'b'), partner('b', 'c')]
+    const { pos } = computeLayout(ids, edges)
+    // All three should share the same row.
+    expect(pos.a.y).toBe(pos.b.y)
+    expect(pos.b.y).toBe(pos.c.y)
+    // b must lie strictly between a and c.
+    const bBetween =
+      (pos.b.x > pos.a.x && pos.b.x < pos.c.x) ||
+      (pos.b.x > pos.c.x && pos.b.x < pos.a.x)
+    expect(bBetween).toBe(true)
+  })
+
+  it('keeps remarried person between partners even alongside siblings', () => {
+    // b is partnered with a and c; all three are children of 'parent'.
+    // The barycenter may start with b, but b must still end up in the middle
+    // of the a–b–c chain so neither partner edge crosses the other partner.
+    const ids = ['parent', 'a', 'b', 'c']
+    const edges: LayoutEdge[] = [
+      pc('parent', 'a'),
+      pc('parent', 'b'),
+      pc('parent', 'c'),
+      partner('a', 'b'),
+      partner('b', 'c'),
+    ]
+    const { pos } = computeLayout(ids, edges)
+    // b must lie strictly between a and c.
+    const bBetween =
+      (pos.b.x > pos.a.x && pos.b.x < pos.c.x) ||
+      (pos.b.x > pos.c.x && pos.b.x < pos.a.x)
+    expect(bBetween).toBe(true)
+  })
+
   it('places grandchildren two rows below grandparents', () => {
     const { pos } = computeLayout(
       ['g', 'p', 'c'],
