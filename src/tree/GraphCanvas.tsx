@@ -449,17 +449,50 @@ export default function GraphCanvas({
             const ux = dx / len
             const uy = dy / len
             const endGap = partner ? NODE_R : NODE_R + 6
+            const x1 = a.x + ux * NODE_R
+            const y1 = a.y + uy * NODE_R
+            const x2 = b.x - ux * endGap
+            const y2 = b.y - uy * endGap
+            // Partner links bow into a gentle arc rather than a straight line.
+            // A straight partner edge collapses onto its neighbours when someone
+            // has two partners on the same row (the middle person looks impaled
+            // on one line); a consistent perpendicular bow reads the two
+            // relationships apart and lifts the line off any node it would pass
+            // under. The bow is oriented by geometry (never by which end is
+            // `from`), so both of a hub's partner edges curve the same way.
+            if (partner) {
+              const bow = Math.min(30, Math.max(12, len * 0.14))
+              let px = -uy
+              let py = ux
+              // Bow "up" on screen (ties bow right) for a stable direction.
+              if (py > 0 || (py === 0 && px < 0)) {
+                px = -px
+                py = -py
+              }
+              const mx = (x1 + x2) / 2 + px * bow
+              const my = (y1 + y2) / 2 + py * bow
+              return (
+                <path
+                  key={e.edgeId}
+                  d={`M ${x1} ${y1} Q ${mx} ${my} ${x2} ${y2}`}
+                  fill="none"
+                  stroke="#fb7185"
+                  strokeWidth={1.75}
+                  strokeDasharray={ended ? '5 4' : undefined}
+                />
+              )
+            }
             return (
               <line
                 key={e.edgeId}
-                x1={a.x + ux * NODE_R}
-                y1={a.y + uy * NODE_R}
-                x2={b.x - ux * endGap}
-                y2={b.y - uy * endGap}
-                stroke={partner ? '#fb7185' : '#38bdf8'}
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke="#38bdf8"
                 strokeWidth={1.75}
                 strokeDasharray={ended ? '5 4' : undefined}
-                markerEnd={partner ? undefined : 'url(#arrow)'}
+                markerEnd="url(#arrow)"
               />
             )
           })}
