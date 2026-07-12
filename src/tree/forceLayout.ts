@@ -7,37 +7,41 @@
 // The radial layout (`radial.ts`) fixes the portrait problem but is
 // ego-centric — it shows one person's relatives, not the whole graph at once.
 //
-// This layout shows *everyone* at once and fills a roughly-square viewport with
-// no overlap. It uses cola.js (webcola): stress majorization matches on-screen
-// distance to graph-theoretic distance (no hairball, space-filling), and a
-// downward flow constraint keeps a top-down genealogical feel (parents above
-// children) without a rigid grid.
+// This layout shows *everyone* at once and expands the whole family organically
+// into open 2D space — filling a roughly-square viewport, fanning branches out in
+// every direction, and untangling edges — rather than stacking people into rigid
+// generational rows (which forced a large family into one very wide line). It
+// uses cola.js (webcola) stress majorization: on-screen distance is matched to
+// graph-theoretic distance, which is naturally space-filling and crossing-averse.
 //
-// Non-overlap is a hard guarantee, but not straight from cola: webcola's
-// avoidOverlaps conflicts with the flow constraints and leaves residual
-// overlaps on larger graphs, so instead we let cola position freely (flow only)
-// and then run one deterministic VPSC separation pass over the settled result.
-// Because the flow spaces successive generations more than a node is tall, the
-// only overlaps that ever occur are between same-level people, so separating in
-// x among vertically-overlapping pairs removes *every* overlap (a collision
-// needs both axes) while leaving the generational y untouched.
+// Deliberately *no* flow constraint. An earlier version pinned each generation to
+// its own horizontal band ("parents above children"); that reads tidily for a
+// couple of generations but smears a real family sideways and fights the
+// space-filling we want. We keep only a mild top-down *seed* (positions are
+// seeded by a cheap generation estimate) so the result still leans roughly
+// ancestors-up / descendants-down, but stress is free to reshape it — generations
+// are not a priority.
+//
+// Non-overlap is a hard guarantee applied after stress settles: cola's
+// `removeOverlaps` (Dwyer's 2D VPSC) finds the minimal-displacement position for
+// every node so no two boxes overlap. Because the spread is 2D (overlaps aren't
+// confined to a row), separation must work in both axes — a single-axis push
+// won't do.
 //
 // Structure — the same trick the radial view uses: instead of a parent→child
 // edge per pair, each union (a couple / co-parent-set and their shared children)
 // gets a virtual "family node", and edges route parent→family→child. That keeps
 // full siblings clustered under one junction and the edge set sparse. A short
-// partner link between spouses pulls couples together, but that soft force alone
-// lets two independent couples settle interleaved (a c b d) so their partner
-// edges cross; a deterministic de-interleave pass (before separation) reorders
-// each generation so every partner group stays a contiguous, non-crossing span.
+// partner link keeps each couple adjacent; with people free to spread in 2D
+// (rather than crammed onto one row) couples no longer interleave.
 //
 // Determinism — cola seeds its descent from a fixed PRNG, we seed each node's
-// initial position from a cheap generation estimate, run a fixed number of
-// iterations synchronously (no async convergence), and the VPSC pass is exact.
-// So the same input yields the same layout on every render — jitter-free and
-// testable.
+// initial position from that generation estimate, run a fixed number of
+// iterations synchronously (no async convergence), and the overlap removal is
+// exact. So the same input yields the same layout on every render — jitter-free
+// and testable.
 
-import { Layout, Variable, Constraint, Solver } from 'webcola'
+import { Layout, Rectangle, removeOverlaps } from 'webcola'
 
 export type ForceEdgeKind = 'parent_child' | 'partner'
 
@@ -86,24 +90,25 @@ export const NODE_W = 120
 export const NODE_H = 60
 export const FAMILY_SIZE = 14
 
-// Center-to-center flow gap between successive generations (applied to each of
-// the parent→family and family→child links, so a parent sits ~2× this above its
-// children — comfortably more than a node is tall, which is what confines every
-// overlap to a single level). Ideal link lengths for the stress term; partners
-// sit closer.
+// Vertical gap between successive generations in the initial *seed* only (a
+// parent is seeded ~2× this above its children). It gives the stress descent a
+// deterministic top-down start; it is not a constraint, so the settled layout may
+// depart from it.
 const GEN_GAP = 76
+// Ideal link lengths for the stress term: parent↔family↔child, and the shorter
+// partner link that keeps a couple adjacent.
 const STRUCT_LEN = 70
 const PARTNER_LEN = NODE_W * 0.75
-// Extra horizontal clearance forced between two *person* boxes beyond the bare
-// no-overlap gap. The overlap-separation pass only stops boxes from touching;
-// this padding gives neighbouring people (and the edges that thread between
-// them) real breathing room, so unrelated families don't crowd into one another.
+// Extra clearance kept around each *person* box during overlap removal (each is
+// inflated by half of this), beyond the bare no-overlap gap. It gives
+// neighbouring people — and the edges that thread between them — real breathing
+// room, so unrelated branches don't crowd into one another.
 const NODE_SEP_PAD = 28
 
 // Fixed iteration budget — enough for a low-hundreds-person family to settle
-// while staying fully deterministic. Phases: unconstrained stress (spread),
-// then user (flow) constraints, then all constraints. Non-overlap is handled by
-// the VPSC pass afterward, not by cola.
+// while staying fully deterministic. Phases mirror cola's start() signature
+// (unconstrained stress, then user constraints, then all); non-overlap is handled
+// by the removeOverlaps pass afterward, not by cola.
 const UNCONSTRAINED_ITERS = 30
 const USER_ITERS = 40
 const ALL_ITERS = 150
@@ -149,23 +154,10 @@ export function computeForceLayout(
   const parentEdges = valid.filter((e) => e.kind === 'parent_child')
   const partnerEdges = valid.filter((e) => e.kind === 'partner')
 
-  // Directed parent/child adjacency plus undirected partners.
+  // Child → parents adjacency, used to group siblings into family unions.
   const parents = new Map<string, string[]>()
-  const children = new Map<string, string[]>()
-  const partners = new Map<string, string[]>()
-  for (const id of nodeIds) {
-    parents.set(id, [])
-    children.set(id, [])
-    partners.set(id, [])
-  }
-  for (const e of parentEdges) {
-    children.get(e.from)!.push(e.to)
-    parents.get(e.to)!.push(e.from)
-  }
-  for (const e of partnerEdges) {
-    partners.get(e.from)!.push(e.to)
-    partners.get(e.to)!.push(e.from)
-  }
+  for (const id of nodeIds) parents.set(id, [])
+  for (const e of parentEdges) parents.get(e.to)!.push(e.from)
 
   // --- Unions → family nodes ----------------------------------------------
   // Group every child by its *set* of parents, so full siblings (same parent
@@ -227,8 +219,7 @@ export function computeForceLayout(
     }
   }
   // Partner links (deduped, unordered) keep spouses adjacent via a short ideal
-  // length. They're flagged so the flow constraint doesn't stack spouses
-  // vertically (they get a zero downward gap — same level is fine).
+  // length. The `partner` flag selects that shorter length in linkDistance.
   const seenPair = new Set<string>()
   for (const e of partnerEdges) {
     const key = e.from < e.to ? `${e.from}|${e.to}` : `${e.to}|${e.from}`
@@ -242,25 +233,22 @@ export function computeForceLayout(
   }
 
   // --- Run cola to a fixed, deterministic result ---------------------------
-  // Flow only, no avoidOverlaps: the two conflict in webcola and leave
-  // overlaps; we remove overlaps deterministically below instead.
+  // Pure stress, no flow: match on-screen distance to graph-theoretic distance
+  // so the whole family spreads organically into open 2D space — filling the
+  // viewport and untangling edges — instead of stacking into rigid generational
+  // rows (which forced a big family into one very wide line). Overlaps are then
+  // removed deterministically in both axes below.
   const layout = new Layout()
     .nodes(colaNodes)
     .links(links)
-    // Downward flow: parent above family above child. Partner links get a zero
-    // gap so a couple can share a level.
-    .flowLayout('y', (l: ColaLink) => (l.partner ? 0 : GEN_GAP))
     .linkDistance((l) =>
       (l as unknown as ColaLink).partner ? PARTNER_LEN : STRUCT_LEN,
     )
+    .avoidOverlaps(false)
   layout.start(UNCONSTRAINED_ITERS, USER_ITERS, ALL_ITERS, 0, false)
 
   const settled = layout.nodes() as unknown as ColaNode[]
-  // Stop partner pairs interleaving (see deinterleavePartners), then remove every
-  // overlap — the de-interleaved same-generation order is fed into the pass so it
-  // survives separation instead of drifting back.
-  const sameGenNeighbours = deinterleavePartners(settled, gen, partners)
-  separateOverlaps(settled, sameGenNeighbours)
+  separateOverlaps(settled)
 
   // --- Collect results -----------------------------------------------------
   const pos: Record<string, Point> = {}
@@ -305,155 +293,25 @@ export function computeForceLayout(
   }
 }
 
-// Remove every node overlap by separating horizontally, in place. For each pair
-// whose boxes overlap vertically we add a VPSC constraint keeping them at least
-// half their combined widths apart in x (ordered by their current x, so the
-// solver preserves left/right order). VPSC then finds the minimal-displacement
-// x for every node satisfying all of them at once — exact and deterministic.
-//
-// This is a *complete* guarantee: an overlap needs both axes, so once no
-// vertically-overlapping pair overlaps in x, nothing overlaps. It leaves y
-// untouched, so the generational flow cola settled on is preserved exactly.
-//
-// `sameGenNeighbours` are consecutive [left, right] person pairs from the
-// de-interleaved per-generation order (see deinterleavePartners). They get the
-// same padded gap even when they don't vertically overlap, so a couple's order
-// is locked in — a partner cola floated to a slightly different row can't drift
-// back across its neighbour and re-interleave. Left→right matches the permuted
-// x, so these stay consistent (a DAG) with the pairwise constraints above.
-function separateOverlaps(
-  nodes: ColaNode[],
-  sameGenNeighbours: Array<[number, number]> = [],
-): void {
-  const vars = nodes.map((n) => new Variable(n.x))
-  const cs: Constraint[] = []
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const a = nodes[i]
-      const b = nodes[j]
-      const yOverlap = (a.height + b.height) / 2 - Math.abs(a.y - b.y)
-      if (yOverlap <= 1e-6) continue
-      // Beyond bare non-overlap, give two people extra room so families read as
-      // distinct clusters; a person↔family-junction pair keeps the tight gap.
-      const pad = !a.isFamily && !b.isFamily ? NODE_SEP_PAD : 0
-      const gap = (a.width + b.width) / 2 + pad
-      if (a.x <= b.x) cs.push(new Constraint(vars[i], vars[j], gap))
-      else cs.push(new Constraint(vars[j], vars[i], gap))
-    }
-  }
-  for (const [li, ri] of sameGenNeighbours) {
-    const a = nodes[li]
-    const b = nodes[ri]
-    const gap = (a.width + b.width) / 2 + NODE_SEP_PAD
-    cs.push(new Constraint(vars[li], vars[ri], gap))
-  }
-  if (cs.length === 0) return
-  new Solver(vars, cs).solve()
-  vars.forEach((v, i) => (nodes[i].x = v.position()))
-}
-
-// Stop partner pairs interleaving. cola positions people by soft forces only, so
-// two independent couples can settle interleaved on a row (a c b d), which leaves
-// each partner edge crossing the other couple and cutting through the people
-// between them — what reads on screen as partners "overlapping". Within each
-// generation we reorder people so every partner-connected group (a couple, or a
-// multi-partner hub) occupies a contiguous span, then hand the resulting
-// left→right order to the separation pass to lock it in.
-//
-// Deterministic and structure-preserving: groups are ordered by their settled
-// centre and members by settled x, and only *who sits in each existing x slot*
-// changes — the row keeps its footprint and every y (so the generational flow)
-// is untouched. Returns the consecutive same-generation [left, right] index
-// pairs for separateOverlaps.
-function deinterleavePartners(
-  nodes: ColaNode[],
-  gen: Map<string, number>,
-  partners: Map<string, string[]>,
-): Array<[number, number]> {
-  const indexById = new Map(nodes.map((n, i) => [n.id, i]))
-  const byGen = new Map<number, ColaNode[]>()
-  for (const n of nodes) {
-    if (n.isFamily) continue
-    const g = gen.get(n.id) ?? 0
-    const bucket = byGen.get(g)
-    if (bucket) bucket.push(n)
-    else byGen.set(g, [n])
-  }
-
-  const consecutive: Array<[number, number]> = []
-  for (const g of [...byGen.keys()].sort((a, b) => a - b)) {
-    const row = byGen.get(g)!
-    if (row.length < 2) continue
-    row.sort((a, b) => a.x - b.x || (a.id < b.id ? -1 : 1))
-    // The x slots this row already occupies; we only permute who sits where.
-    const slots = row.map((n) => n.x)
-    const inRow = new Set(row.map((n) => n.id))
-
-    // Partner-connected groups within the row (BFS over partner edges).
-    const groupOf = new Map<string, number>()
-    const groups: ColaNode[][] = []
-    for (const n of row) {
-      if (groupOf.has(n.id)) continue
-      const members: ColaNode[] = []
-      groups.push(members)
-      const queue = [n]
-      groupOf.set(n.id, groups.length - 1)
-      while (queue.length) {
-        const cur = queue.shift()!
-        members.push(cur)
-        for (const pid of partners.get(cur.id) ?? []) {
-          if (inRow.has(pid) && !groupOf.has(pid)) {
-            groupOf.set(pid, groups.length - 1)
-            queue.push(nodes[indexById.get(pid)!])
-          }
-        }
-      }
-    }
-    if (groups.length === row.length) continue // no partners in this row
-
-    // Order members within each group (hub centred), groups by their centre.
-    const ordered = groups
-      .map((members) => ({
-        members: orderPartnerGroup(members, partners),
-        key: avg(members.map((m) => m.x)),
-      }))
-      .sort((a, b) => a.key - b.key)
-      .flatMap((entry) => entry.members)
-
-    ordered.forEach((n, i) => (n.x = slots[i]))
-    for (let i = 1; i < ordered.length; i++) {
-      consecutive.push([
-        indexById.get(ordered[i - 1].id)!,
-        indexById.get(ordered[i].id)!,
-      ])
-    }
-  }
-  return consecutive
-}
-
-// Order a partner-connected group so it reads without a crossing: a plain couple
-// keeps left-right order; a hub with several partners sits in the middle with its
-// partners split to either side. Mirrors the layered layout's rule so the two
-// views agree.
-function orderPartnerGroup(
-  members: ColaNode[],
-  partners: Map<string, string[]>,
-): ColaNode[] {
-  const byX = [...members].sort((a, b) => a.x - b.x || (a.id < b.id ? -1 : 1))
-  if (byX.length < 3) return byX
-  const inGroup = new Set(byX.map((n) => n.id))
-  let hub = byX[0]
-  let maxDeg = -1
-  for (const n of byX) {
-    const deg = (partners.get(n.id) ?? []).filter((p) => inGroup.has(p)).length
-    if (deg > maxDeg) {
-      maxDeg = deg
-      hub = n
-    }
-  }
-  const others = byX.filter((n) => n.id !== hub.id)
-  const half = Math.floor(others.length / 2)
-  return [...others.slice(0, half), hub, ...others.slice(half)]
+// Remove every node overlap in place, in both axes. cola's `removeOverlaps`
+// (Dwyer's 2D VPSC) finds the minimal-displacement position for every node so no
+// two boxes overlap — exact and deterministic, and, unlike a single-axis push,
+// it works for the organic 2D spread where overlaps aren't confined to a row.
+// Person boxes are inflated by half of NODE_SEP_PAD each so neighbours keep real
+// breathing room (and their labels don't collide); the small family junctions
+// get the bare gap.
+function separateOverlaps(nodes: ColaNode[]): void {
+  const rects = nodes.map((n) => {
+    const pad = n.isFamily ? 0 : NODE_SEP_PAD / 2
+    const halfW = n.width / 2 + pad
+    const halfH = n.height / 2 + pad
+    return new Rectangle(n.x - halfW, n.x + halfW, n.y - halfH, n.y + halfH)
+  })
+  removeOverlaps(rects)
+  nodes.forEach((n, i) => {
+    n.x = rects[i].cx()
+    n.y = rects[i].cy()
+  })
 }
 
 interface Union {
