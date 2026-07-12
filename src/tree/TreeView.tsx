@@ -240,12 +240,9 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
               Views
             </h3>
             <p>
-              <span className="text-zinc-100">Tree</span> — everyone, laid out
-              by generation.
-            </p>
-            <p>
-              <span className="text-zinc-100">Focus</span> — zoom in on one
-              person and their close family; tap anyone to re-center on them.
+              <span className="text-zinc-100">Focus</span> — the default: zoom in
+              on one person and their close family; tap anyone to re-center on
+              them.
             </p>
             <p>
               <span className="text-zinc-100">Radial</span> — one person at the
@@ -253,6 +250,17 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
               below (one hue per family branch); spouses show as thin bands and
               siblings flank the center. Tap anyone to re-root the chart on them.
               Best for large or complex families on a phone.
+            </p>
+            <p>
+              <span className="text-zinc-100">Graph</span> — the whole family at
+              once, arranged by a force layout that clusters each couple and
+              their children under a small junction dot. Parents sit above their
+              children with no overlap; good for seeing everyone together on a
+              portrait screen.
+            </p>
+            <p>
+              <span className="text-zinc-100">Tree</span> — everyone, laid out
+              by generation.
             </p>
           </section>
 
@@ -302,7 +310,7 @@ function Legend() {
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-amber-400" />{' '}
-        adopted / step (radial)
+        non-biological (step / adopted / foster)
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-zinc-400" />{' '}

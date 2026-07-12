@@ -203,6 +203,70 @@ describe('TreeView', () => {
     )
   })
 
+  it('renders family junctions and dashed non-biological edges in Graph mode', async () => {
+    vi.mocked(getGraph).mockResolvedValue({
+      nodes: [
+        person('nod_a', 'Ada'),
+        person('nod_b', 'Bo'),
+        person('nod_c', 'Cy'),
+      ],
+      edges: [
+        {
+          edgeId: 'edg_partner',
+          groupId: 'grp_1',
+          edgeKind: 'partner',
+          fromPerson: 'nod_a',
+          toPerson: 'nod_b',
+          subtype: 'married',
+          startDate: null,
+          endDate: null,
+          createdAt: 't',
+          updatedAt: 't',
+          updatedBy: 'acc_1',
+        },
+        {
+          edgeId: 'edg_parent_1',
+          groupId: 'grp_1',
+          edgeKind: 'parent_child',
+          fromPerson: 'nod_a',
+          toPerson: 'nod_c',
+          subtype: 'foster',
+          startDate: null,
+          endDate: null,
+          createdAt: 't',
+          updatedAt: 't',
+          updatedBy: 'acc_1',
+        },
+        {
+          edgeId: 'edg_parent_2',
+          groupId: 'grp_1',
+          edgeKind: 'parent_child',
+          fromPerson: 'nod_b',
+          toPerson: 'nod_c',
+          subtype: 'foster',
+          startDate: null,
+          endDate: null,
+          createdAt: 't',
+          updatedAt: 't',
+          updatedBy: 'acc_1',
+        },
+      ],
+    })
+    const { container } = render(<TreeView group={group} />)
+
+    await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Graph' }))
+
+    const svg = screen.getByRole('img', { name: 'Family graph' })
+    expect(svg).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Graph' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(container.querySelector('circle[r="4"][fill="#52525b"]')).not.toBeNull()
+    expect(container.querySelector('path[stroke-dasharray="5 4"]')).not.toBeNull()
+  })
+
   it('hides "This is me" when the caller is already linked elsewhere', async () => {
     vi.mocked(getGraph).mockResolvedValue(graph)
     // The caller is already linked to Bo, so Ada must not offer "This is me".
