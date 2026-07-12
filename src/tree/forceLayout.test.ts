@@ -51,26 +51,6 @@ function worstOverlap(layout: ForceLayout): number {
   return worst
 }
 
-// True only when segments p1p2 and p3p4 properly cross (intersect at a point
-// interior to both). Segments that merely share an endpoint don't count.
-function segmentsCross(
-  p1: { x: number; y: number },
-  p2: { x: number; y: number },
-  p3: { x: number; y: number },
-  p4: { x: number; y: number },
-): boolean {
-  const cross = (o: typeof p1, a: typeof p1, b: typeof p1) =>
-    (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
-  const d1 = cross(p3, p4, p1)
-  const d2 = cross(p3, p4, p2)
-  const d3 = cross(p1, p2, p3)
-  const d4 = cross(p1, p2, p4)
-  return (
-    ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
-    ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
-  )
-}
-
 describe('computeForceLayout', () => {
   it('returns an empty layout for no nodes', () => {
     const l = computeForceLayout([], [])
@@ -215,11 +195,14 @@ describe('computeForceLayout', () => {
     }
   })
 
-  it("keeps two couples' partner edges from crossing", () => {
+  it('keeps two couples from interleaving', () => {
     // partners (a,b) and (c,d), cross-linked by children (a&c co-parent one kid,
     // b&d another). On a single generational row cola settled these interleaved
     // (a c b d) so the two partner edges crossed; spreading freely in 2D, each
-    // couple sits together and the edges don't cross.
+    // couple sits together. Assert non-interleaving directly: sorted left→right,
+    // the two partners of each couple are adjacent (a c b d would split them).
+    // (A segment-crossing test can't catch it — an interleaved row is collinear,
+    // so the segments overlap without a proper intersection.)
     const ids = ['a', 'b', 'c', 'd', 'ac', 'bd']
     const l = computeForceLayout(ids, [
       partner('a', 'b'),
@@ -229,28 +212,27 @@ describe('computeForceLayout', () => {
       pc('b', 'bd'),
       pc('d', 'bd'),
     ])
-    expect(segmentsCross(l.pos.a, l.pos.b, l.pos.c, l.pos.d)).toBe(false)
+    const order = ['a', 'b', 'c', 'd'].sort((p, q) => l.pos[p].x - l.pos[q].x)
+    const adjacent = (p: string, q: string) =>
+      Math.abs(order.indexOf(p) - order.indexOf(q)) === 1
+    expect(adjacent('a', 'b')).toBe(true)
+    expect(adjacent('c', 'd')).toBe(true)
   })
 
-  it('places a hub between its partners without crossing partner edges', () => {
+  it('places a multi-partner hub between its partners', () => {
     // A hub married to three people who are otherwise unconnected: the partner
-    // links pull them symmetrically around the hub, so no two partner edges cross.
+    // links pull them symmetrically around the hub, so the hub settles among them
+    // rather than off to one side. Assert it sits horizontally between the outer
+    // partners (min partner x < hub x < max partner x).
     const ids = ['p1', 'hub', 'p2', 'p3']
     const l = computeForceLayout(ids, [
       partner('hub', 'p1'),
       partner('hub', 'p2'),
       partner('hub', 'p3'),
     ])
-    const partnersOf = ['p1', 'p2', 'p3']
-    for (let i = 0; i < partnersOf.length; i++) {
-      for (let j = i + 1; j < partnersOf.length; j++) {
-        // Both edges share the hub endpoint, so they can only meet at the hub —
-        // never cross midway.
-        expect(
-          segmentsCross(l.pos.hub, l.pos[partnersOf[i]], l.pos.hub, l.pos[partnersOf[j]]),
-        ).toBe(false)
-      }
-    }
+    const xs = ['p1', 'p2', 'p3'].map((id) => l.pos[id].x)
+    expect(l.pos.hub.x).toBeGreaterThan(Math.min(...xs))
+    expect(l.pos.hub.x).toBeLessThan(Math.max(...xs))
   })
 
   it('never overlaps nodes, even in a large dense tree', () => {

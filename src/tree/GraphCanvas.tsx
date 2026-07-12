@@ -431,9 +431,11 @@ export default function GraphCanvas({
                     const s = pcSubtype.get(`${pid}>${cid}`)
                     return s && s !== 'biological'
                   })
-                  // A short, invisible chord over the middle of the curve carries
-                  // the lineage arrowhead, oriented along the curve toward the
-                  // child (junction=(f.x,f.y), control=(f.x,b.y), child=(b.x,b.y)).
+                  // A short chord over the middle of the curve carries the lineage
+                  // arrowhead, oriented along the curve toward the child
+                  // (junction=(f.x,f.y), control=(f.x,b.y), child=(b.x,b.y)). The
+                  // chord itself is unstroked — only the marker paints (it has its
+                  // own stroke) — so it never fills in a dashed edge's gaps.
                   const t1 = quadPoint(f.x, f.y, f.x, b.y, b.x, b.y, 0.48)
                   const t2 = quadPoint(f.x, f.y, f.x, b.y, b.x, b.y, 0.6)
                   return (
@@ -450,8 +452,7 @@ export default function GraphCanvas({
                         y1={t1.y}
                         x2={t2.x}
                         y2={t2.y}
-                        stroke="#38bdf8"
-                        strokeWidth={1.75}
+                        stroke="none"
                         markerEnd="url(#lineage)"
                       />
                     </g>
