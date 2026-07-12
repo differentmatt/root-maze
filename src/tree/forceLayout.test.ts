@@ -158,6 +158,32 @@ describe('computeForceLayout', () => {
     expect(worstOverlap(computeForceLayout(ids, edges))).toBeLessThan(0.01)
   })
 
+  it('keeps vertically overlapping people at padded horizontal clearance', () => {
+    const paddedPersonGap = NODE_W + 28
+    const ids = ['mom', 'dad', 'kid1', 'kid2']
+    const l = computeForceLayout(ids, [
+      partner('mom', 'dad'),
+      pc('mom', 'kid1'),
+      pc('dad', 'kid1'),
+      pc('mom', 'kid2'),
+      pc('dad', 'kid2'),
+    ])
+    const overlappingPeople: Array<readonly [string, string]> = []
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = ids[i]
+        const b = ids[j]
+        if (Math.abs(l.pos[a].y - l.pos[b].y) < NODE_H) {
+          overlappingPeople.push([a, b])
+        }
+      }
+    }
+    expect(overlappingPeople.length).toBeGreaterThan(0)
+    for (const [a, b] of overlappingPeople) {
+      expect(Math.abs(l.pos[a].x - l.pos[b].x)).toBeGreaterThanOrEqual(paddedPersonGap - 0.01)
+    }
+  })
+
   it('never overlaps nodes, even in a large dense tree', () => {
     // A synthetic 4-generation family: couples with several children each. Two
     // founding couples fan out to 100+ people — enough to stress the invariant,
