@@ -188,7 +188,12 @@ export function rankRelationshipCandidates(
 // --- member → person similarity ----------------------------------------------
 
 function normalize(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  return s
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
 }
 
 function tokensOf(s: string | null | undefined): string[] {

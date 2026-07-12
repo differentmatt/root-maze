@@ -68,6 +68,8 @@ describe('PersonPicker', () => {
     fireEvent.click(screen.getByLabelText('pick'))
     expect(screen.getByText('Suggested')).toBeInTheDocument()
     expect(screen.getByText('All people')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Suggested' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'All people' })).toBeInTheDocument()
     // Headers carry role=presentation, so only the real people are options.
     expect(screen.getAllByRole('option')).toHaveLength(3)
   })
@@ -100,5 +102,21 @@ describe('PersonPicker', () => {
     // Both contain "an"; "Ann" (prefix) should rank above "Diana" (mid-word).
     const labels = screen.getAllByRole('option').map((el) => el.textContent)
     expect(labels).toEqual(['Ann', 'Diana'])
+  })
+
+  it('uses the best match across repeated occurrences in a label', () => {
+    const opts = [
+      { id: '1', label: 'Diana Ann' },
+      { id: '2', label: 'Jo Ann' },
+    ]
+    render(<PersonPicker options={opts} value={null} onChange={() => {}} ariaLabel="pick" />)
+    fireEvent.click(screen.getByLabelText('pick'))
+    fireEvent.change(screen.getByPlaceholderText('Type to filter…'), {
+      target: { value: 'an' },
+    })
+    // Both labels have a word-start match ("Ann"), so they should tie and keep
+    // their original order instead of penalizing the earlier mid-word hit.
+    const labels = screen.getAllByRole('option').map((el) => el.textContent)
+    expect(labels).toEqual(['Diana Ann', 'Jo Ann'])
   })
 })

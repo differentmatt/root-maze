@@ -35,11 +35,13 @@ const SECTION_LABELS: Record<'suggested' | 'all', string> = {
 // by original index). Returns null when the query doesn't match at all.
 function queryScore(label: string, q: string): number | null {
   const l = label.toLowerCase()
-  const i = l.indexOf(q)
-  if (i === -1) return null
-  if (i === 0) return 3
-  if (/\s/.test(l[i - 1] ?? '')) return 2
-  return 1
+  let best: number | null = null
+  for (let i = l.indexOf(q); i !== -1; i = l.indexOf(q, i + 1)) {
+    const score = i === 0 ? 3 : /\s/.test(l[i - 1] ?? '') ? 2 : 1
+    if (score === 3) return score
+    best = best === null ? score : Math.max(best, score)
+  }
+  return best
 }
 
 function rankByQuery(list: PickerOption[], q: string): PickerOption[] {
@@ -198,16 +200,30 @@ export default function PersonPicker({
     for (const g of groups) {
       if (g.items.length === 0) continue
       if (hasSections && g.section) {
+        const sectionLabel = SECTION_LABELS[g.section]
+        const groupOptions = g.items.map((item) => {
+          const option = renderOption(item, idx)
+          idx += 1
+          return option
+        })
         els.push(
           <li
             key={`__section-${g.section}`}
             role="presentation"
-            aria-hidden
-            className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-zinc-500"
+            className="pt-2"
           >
-            {SECTION_LABELS[g.section]}
+            <div
+              aria-hidden
+              className="px-3 pb-1 text-xs font-medium uppercase tracking-wide text-zinc-500"
+            >
+              {sectionLabel}
+            </div>
+            <ul role="group" aria-label={sectionLabel}>
+              {groupOptions}
+            </ul>
           </li>,
         )
+        continue
       }
       for (const item of g.items) {
         els.push(renderOption(item, idx))

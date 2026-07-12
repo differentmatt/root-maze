@@ -181,4 +181,20 @@ describe('rankLinkCandidates', () => {
     expect(suggested).toEqual([])
     expect(rest.map((n) => n.nodeId)).toEqual(['a', 'b'])
   })
+
+  it('matches international names when ranking', () => {
+    const { suggested } = rankLinkCandidates(
+      member({ name: '李明' }),
+      [node('latin', 'Maria Gomez'), node('intl', '李明')],
+    )
+    expect(suggested.map((s) => s.node.nodeId)).toContain('intl')
+  })
+
+  it('strips accents when ranking name matches', () => {
+    const { suggested } = rankLinkCandidates(
+      member({ name: 'María Gómez' }),
+      [node('latin', 'Maria Gomez'), node('other', 'Bob Byron')],
+    )
+    expect(suggested.map((s) => s.node.nodeId)).toEqual(['latin'])
+  })
 })
