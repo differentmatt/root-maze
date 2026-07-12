@@ -7,32 +7,40 @@
 // The radial layout (`radial.ts`) fixes the portrait problem but is
 // ego-centric — it shows one person's relatives, not the whole graph at once.
 //
-// This layout shows *everyone* at once and fills a roughly-square viewport with
-// no overlap. It uses cola.js (webcola): stress majorization matches on-screen
-// distance to graph-theoretic distance (no hairball, space-filling), and a
-// downward flow constraint keeps a top-down genealogical feel (parents above
-// children) without a rigid grid.
+// This layout shows *everyone* at once and expands the whole family organically
+// into open 2D space — filling a roughly-square viewport, fanning branches out in
+// every direction, and untangling edges — rather than stacking people into rigid
+// generational rows (which forced a large family into one very wide line). It
+// uses cola.js (webcola) stress majorization: on-screen distance is matched to
+// graph-theoretic distance, which is naturally space-filling and crossing-averse.
 //
-// Non-overlap is a hard guarantee, but not straight from cola: webcola's
-// avoidOverlaps conflicts with the flow constraints and leaves residual
-// overlaps on larger graphs, so instead we let cola position freely (flow only)
-// and then run one deterministic VPSC separation pass over the settled result.
-// Because the flow spaces successive generations more than a node is tall, the
-// only overlaps that ever occur are between same-level people, so separating in
-// x among vertically-overlapping pairs removes *every* overlap (a collision
-// needs both axes) while leaving the generational y untouched.
+// Deliberately *no* flow constraint. An earlier version pinned each generation to
+// its own horizontal band ("parents above children"); that reads tidily for a
+// couple of generations but smears a real family sideways and fights the
+// space-filling we want. We keep only a mild top-down *seed* (positions are
+// seeded by a cheap generation estimate) so the result still leans roughly
+// ancestors-up / descendants-down, but stress is free to reshape it — generations
+// are not a priority.
+//
+// Non-overlap is a hard guarantee applied after stress settles: one deterministic
+// VPSC pass separates every vertically-overlapping pair horizontally. That's
+// complete for any layout (a collision needs both axes), and separating in x
+// rather than y keeps couples side by side instead of stacking one partner above
+// the other.
 //
 // Structure — the same trick the radial view uses: instead of a parent→child
 // edge per pair, each union (a couple / co-parent-set and their shared children)
 // gets a virtual "family node", and edges route parent→family→child. That keeps
-// full siblings clustered under one junction and the edge set sparse. A short
-// partner link between spouses keeps couples adjacent.
+// full siblings clustered under one junction and the edge set sparse. A *tight*
+// partner link clamps each couple into one unit, so their children fan out to one
+// side rather than crossing back over a long partner line; and with people free
+// to spread in 2D (rather than crammed onto one row) couples no longer interleave.
 //
 // Determinism — cola seeds its descent from a fixed PRNG, we seed each node's
-// initial position from a cheap generation estimate, run a fixed number of
-// iterations synchronously (no async convergence), and the VPSC pass is exact.
-// So the same input yields the same layout on every render — jitter-free and
-// testable.
+// initial position from that generation estimate, run a fixed number of
+// iterations synchronously (no async convergence), and the overlap removal is
+// exact. So the same input yields the same layout on every render — jitter-free
+// and testable.
 
 import { Layout, Variable, Constraint, Solver } from 'webcola'
 
@@ -83,24 +91,28 @@ export const NODE_W = 120
 export const NODE_H = 60
 export const FAMILY_SIZE = 14
 
-// Center-to-center flow gap between successive generations (applied to each of
-// the parent→family and family→child links, so a parent sits ~2× this above its
-// children — comfortably more than a node is tall, which is what confines every
-// overlap to a single level). Ideal link lengths for the stress term; partners
-// sit closer.
+// Vertical gap between successive generations in the initial *seed* only (a
+// parent is seeded ~2× this above its children). It gives the stress descent a
+// deterministic top-down start; it is not a constraint, so the settled layout may
+// depart from it.
 const GEN_GAP = 76
+// Ideal link lengths for the stress term. STRUCT_LEN spaces parent↔family↔child.
+// PARTNER_LEN is deliberately much shorter than STRUCT_LEN — shorter, in fact,
+// than the enforced no-overlap gap, so the stress term pulls a couple as tight as
+// it's allowed to sit. A tight couple reads as one unit and, crucially, keeps its
+// partner edge short: the family's children then bulge out to one side instead of
+// straddling a long partner line, so descendant edges rarely cross it.
 const STRUCT_LEN = 70
-const PARTNER_LEN = NODE_W * 0.75
+const PARTNER_LEN = NODE_W * 0.35
 // Extra horizontal clearance forced between two *person* boxes beyond the bare
-// no-overlap gap. The overlap-separation pass only stops boxes from touching;
-// this padding gives neighbouring people (and the edges that thread between
-// them) real breathing room, so unrelated families don't crowd into one another.
+// no-overlap gap, so neighbouring people — and the edges that thread between
+// them — get real breathing room and unrelated branches don't crowd together.
 const NODE_SEP_PAD = 28
 
 // Fixed iteration budget — enough for a low-hundreds-person family to settle
-// while staying fully deterministic. Phases: unconstrained stress (spread),
-// then user (flow) constraints, then all constraints. Non-overlap is handled by
-// the VPSC pass afterward, not by cola.
+// while staying fully deterministic. Phases mirror cola's start() signature
+// (unconstrained stress, then user constraints, then all); non-overlap is handled
+// by the removeOverlaps pass afterward, not by cola.
 const UNCONSTRAINED_ITERS = 30
 const USER_ITERS = 40
 const ALL_ITERS = 150
@@ -146,23 +158,10 @@ export function computeForceLayout(
   const parentEdges = valid.filter((e) => e.kind === 'parent_child')
   const partnerEdges = valid.filter((e) => e.kind === 'partner')
 
-  // Directed parent/child adjacency plus undirected partners.
+  // Child → parents adjacency, used to group siblings into family unions.
   const parents = new Map<string, string[]>()
-  const children = new Map<string, string[]>()
-  const partners = new Map<string, string[]>()
-  for (const id of nodeIds) {
-    parents.set(id, [])
-    children.set(id, [])
-    partners.set(id, [])
-  }
-  for (const e of parentEdges) {
-    children.get(e.from)!.push(e.to)
-    parents.get(e.to)!.push(e.from)
-  }
-  for (const e of partnerEdges) {
-    partners.get(e.from)!.push(e.to)
-    partners.get(e.to)!.push(e.from)
-  }
+  for (const id of nodeIds) parents.set(id, [])
+  for (const e of parentEdges) parents.get(e.to)!.push(e.from)
 
   // --- Unions → family nodes ----------------------------------------------
   // Group every child by its *set* of parents, so full siblings (same parent
@@ -224,8 +223,7 @@ export function computeForceLayout(
     }
   }
   // Partner links (deduped, unordered) keep spouses adjacent via a short ideal
-  // length. They're flagged so the flow constraint doesn't stack spouses
-  // vertically (they get a zero downward gap — same level is fine).
+  // length. The `partner` flag selects that shorter length in linkDistance.
   const seenPair = new Set<string>()
   for (const e of partnerEdges) {
     const key = e.from < e.to ? `${e.from}|${e.to}` : `${e.to}|${e.from}`
@@ -239,17 +237,18 @@ export function computeForceLayout(
   }
 
   // --- Run cola to a fixed, deterministic result ---------------------------
-  // Flow only, no avoidOverlaps: the two conflict in webcola and leave
-  // overlaps; we remove overlaps deterministically below instead.
+  // Pure stress, no flow: match on-screen distance to graph-theoretic distance
+  // so the whole family spreads organically into open 2D space — filling the
+  // viewport and untangling edges — instead of stacking into rigid generational
+  // rows (which forced a big family into one very wide line). Overlaps are then
+  // removed deterministically in both axes below.
   const layout = new Layout()
     .nodes(colaNodes)
     .links(links)
-    // Downward flow: parent above family above child. Partner links get a zero
-    // gap so a couple can share a level.
-    .flowLayout('y', (l: ColaLink) => (l.partner ? 0 : GEN_GAP))
     .linkDistance((l) =>
       (l as unknown as ColaLink).partner ? PARTNER_LEN : STRUCT_LEN,
     )
+    .avoidOverlaps(false)
   layout.start(UNCONSTRAINED_ITERS, USER_ITERS, ALL_ITERS, 0, false)
 
   const settled = layout.nodes() as unknown as ColaNode[]
@@ -301,12 +300,15 @@ export function computeForceLayout(
 // Remove every node overlap by separating horizontally, in place. For each pair
 // whose boxes overlap vertically we add a VPSC constraint keeping them at least
 // half their combined widths apart in x (ordered by their current x, so the
-// solver preserves left/right order). VPSC then finds the minimal-displacement
-// x for every node satisfying all of them at once — exact and deterministic.
+// solver preserves left/right order). VPSC then finds the minimal-displacement x
+// for every node satisfying all of them at once — exact and deterministic.
 //
-// This is a *complete* guarantee: an overlap needs both axes, so once no
-// vertically-overlapping pair overlaps in x, nothing overlaps. It leaves y
-// untouched, so the generational flow cola settled on is preserved exactly.
+// This is a *complete* guarantee for any layout, not just a row-based one: an
+// overlap needs both axes, so once no vertically-overlapping pair overlaps in x,
+// nothing overlaps. Separating in x (never y) also keeps a couple side by side
+// rather than stacking one partner above the other. (cola's 2D `removeOverlaps`
+// does the opposite — it stacks aligned couples vertically, and doesn't separate
+// two boxes sharing a y-centre at all — so we don't use it.)
 function separateOverlaps(nodes: ColaNode[]): void {
   const vars = nodes.map((n) => new Variable(n.x))
   const cs: Constraint[] = []

@@ -110,8 +110,10 @@ describe('computeForceLayout', () => {
     expect(momDad.children.sort()).toEqual(['k1', 'k2'])
   })
 
-  it('puts parents above children across every parent_child edge once settled', () => {
-    // A three-generation family with a remarriage and an adoption.
+  it('leans ancestors-up / descendants-down (a mild seed tendency, not a rule)', () => {
+    // The layout no longer pins generations to rows, but the generation-based
+    // seed still gives a gentle top-down lean: on average each deeper generation
+    // sits lower than the one above it.
     const ids = ['gm', 'gf', 'mom', 'dad', 'me', 'sis', 'spouse', 'kid', 'adopt']
     const edges = [
       partner('gm', 'gf'),
@@ -129,19 +131,28 @@ describe('computeForceLayout', () => {
       pc('spouse', 'kid'),
     ]
     const l = computeForceLayout(ids, edges)
-    for (const e of edges) {
-      if (e.kind !== 'parent_child') continue
-      expect(l.pos[e.from].y).toBeLessThan(l.pos[e.to].y)
-    }
+    const avgY = (gen: string[]) =>
+      gen.reduce((s, id) => s + l.pos[id].y, 0) / gen.length
+    const grandparents = avgY(['gm', 'gf'])
+    const parents = avgY(['mom', 'dad'])
+    const grandchild = l.pos.kid.y
+    expect(grandparents).toBeLessThan(parents)
+    expect(parents).toBeLessThan(grandchild)
   })
 
-  it('routes a family junction below its parents and above its children', () => {
+  it('routes a family junction between its parents and children', () => {
+    // The junction stays local to its family so parent→family→child edges are
+    // short — its position is bounded by the people it links (whatever direction
+    // the family happens to fan).
     const ids = ['mom', 'dad', 'kid']
     const l = computeForceLayout(ids, [pc('mom', 'kid'), pc('dad', 'kid'), partner('mom', 'dad')])
     const fam = l.familyNodes[0]
-    expect(fam.y).toBeGreaterThan(l.pos.mom.y)
-    expect(fam.y).toBeGreaterThan(l.pos.dad.y)
-    expect(fam.y).toBeLessThan(l.pos.kid.y)
+    const ys = [l.pos.mom.y, l.pos.dad.y, l.pos.kid.y]
+    const xs = [l.pos.mom.x, l.pos.dad.x, l.pos.kid.x]
+    expect(fam.y).toBeGreaterThanOrEqual(Math.min(...ys) - 0.01)
+    expect(fam.y).toBeLessThanOrEqual(Math.max(...ys) + 0.01)
+    expect(fam.x).toBeGreaterThanOrEqual(Math.min(...xs) - 0.01)
+    expect(fam.x).toBeLessThanOrEqual(Math.max(...xs) + 0.01)
   })
 
   it('never overlaps any two nodes in a small family', () => {
@@ -182,6 +193,46 @@ describe('computeForceLayout', () => {
     for (const [a, b] of overlappingPeople) {
       expect(Math.abs(l.pos[a].x - l.pos[b].x)).toBeGreaterThanOrEqual(paddedPersonGap - 0.01)
     }
+  })
+
+  it('keeps two couples from interleaving', () => {
+    // partners (a,b) and (c,d), cross-linked by children (a&c co-parent one kid,
+    // b&d another). On a single generational row cola settled these interleaved
+    // (a c b d) so the two partner edges crossed; spreading freely in 2D, each
+    // couple sits together. Assert non-interleaving directly: sorted left→right,
+    // the two partners of each couple are adjacent (a c b d would split them).
+    // (A segment-crossing test can't catch it — an interleaved row is collinear,
+    // so the segments overlap without a proper intersection.)
+    const ids = ['a', 'b', 'c', 'd', 'ac', 'bd']
+    const l = computeForceLayout(ids, [
+      partner('a', 'b'),
+      partner('c', 'd'),
+      pc('a', 'ac'),
+      pc('c', 'ac'),
+      pc('b', 'bd'),
+      pc('d', 'bd'),
+    ])
+    const order = ['a', 'b', 'c', 'd'].sort((p, q) => l.pos[p].x - l.pos[q].x)
+    const adjacent = (p: string, q: string) =>
+      Math.abs(order.indexOf(p) - order.indexOf(q)) === 1
+    expect(adjacent('a', 'b')).toBe(true)
+    expect(adjacent('c', 'd')).toBe(true)
+  })
+
+  it('places a multi-partner hub between its partners', () => {
+    // A hub married to three people who are otherwise unconnected: the partner
+    // links pull them symmetrically around the hub, so the hub settles among them
+    // rather than off to one side. Assert it sits horizontally between the outer
+    // partners (min partner x < hub x < max partner x).
+    const ids = ['p1', 'hub', 'p2', 'p3']
+    const l = computeForceLayout(ids, [
+      partner('hub', 'p1'),
+      partner('hub', 'p2'),
+      partner('hub', 'p3'),
+    ])
+    const xs = ['p1', 'p2', 'p3'].map((id) => l.pos[id].x)
+    expect(l.pos.hub.x).toBeGreaterThan(Math.min(...xs))
+    expect(l.pos.hub.x).toBeLessThan(Math.max(...xs))
   })
 
   it('never overlaps nodes, even in a large dense tree', () => {

@@ -120,8 +120,9 @@ function labelPathId(id: string): string {
 // two nested wedge fans — ancestors above, descendants below — each colored by
 // branch. A married-in co-parent (who isn't a blood relative and so has no
 // wedge) is drawn as a thin rose "spouse band" at the base of that union's
-// children, and step/adoptive links are dashed, so remarriage/adoption/multiple
-// parents stay legible where a plain fan chart can't show them. The focus's
+// children. Adoptive/step/foster parentage is drawn exactly like biological (no
+// othering); only remarriage (ended = dashed) and half-siblings stay marked. The
+// focus's
 // siblings and childless partners — who belong to neither fan — fill the clear
 // horizontal channel between them as ring-1 slices. Everyone but the focus is a
 // wedge. Tap anyone to re-root the chart on them. It shares the pan/zoom +
@@ -245,7 +246,6 @@ export default function RadialCanvas({
             if (!n) return null
             const spouse = w.kind === 'spouse'
             const sibling = w.kind === 'sibling'
-            const nonBio = Boolean(w.subtype && w.subtype !== 'biological')
             const halfSib = sibling && Boolean(w.half)
             const selected = w.id === selectedId
             const isMe = meNodeId != null && w.id === meNodeId
@@ -285,13 +285,14 @@ export default function RadialCanvas({
                   fillOpacity={
                     thin ? (w.ended ? 0.18 : 0.34) : selected ? 0.55 : 0.28
                   }
-                  // Dashed amber = step/adoptive; dashed rose = ended marriage;
-                  // dashed neutral = half-sibling.
-                  stroke={isMe ? '#34d399' : nonBio ? '#fbbf24' : color}
-                  strokeOpacity={isMe || nonBio ? 0.9 : 0.6}
+                  // Adoptive/step/foster parentage looks exactly like biological
+                  // — no othering. Dashed rose = ended marriage; dashed neutral =
+                  // half-sibling.
+                  stroke={isMe ? '#34d399' : color}
+                  strokeOpacity={isMe ? 0.9 : 0.6}
                   strokeWidth={isMe ? 2 : 1}
                   strokeDasharray={
-                    nonBio || (spouse && w.ended) || halfSib ? '4 3' : undefined
+                    (spouse && w.ended) || halfSib ? '4 3' : undefined
                   }
                 />
                 {lbl.curved ? (
