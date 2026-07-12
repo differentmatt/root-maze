@@ -22,18 +22,19 @@
 // ancestors-up / descendants-down, but stress is free to reshape it — generations
 // are not a priority.
 //
-// Non-overlap is a hard guarantee applied after stress settles: cola's
-// `removeOverlaps` (Dwyer's 2D VPSC) finds the minimal-displacement position for
-// every node so no two boxes overlap. Because the spread is 2D (overlaps aren't
-// confined to a row), separation must work in both axes — a single-axis push
-// won't do.
+// Non-overlap is a hard guarantee applied after stress settles: one deterministic
+// VPSC pass separates every vertically-overlapping pair horizontally. That's
+// complete for any layout (a collision needs both axes), and separating in x
+// rather than y keeps couples side by side instead of stacking one partner above
+// the other.
 //
 // Structure — the same trick the radial view uses: instead of a parent→child
 // edge per pair, each union (a couple / co-parent-set and their shared children)
 // gets a virtual "family node", and edges route parent→family→child. That keeps
-// full siblings clustered under one junction and the edge set sparse. A short
-// partner link keeps each couple adjacent; with people free to spread in 2D
-// (rather than crammed onto one row) couples no longer interleave.
+// full siblings clustered under one junction and the edge set sparse. A *tight*
+// partner link clamps each couple into one unit, so their children fan out to one
+// side rather than crossing back over a long partner line; and with people free
+// to spread in 2D (rather than crammed onto one row) couples no longer interleave.
 //
 // Determinism — cola seeds its descent from a fixed PRNG, we seed each node's
 // initial position from that generation estimate, run a fixed number of
@@ -41,7 +42,7 @@
 // exact. So the same input yields the same layout on every render — jitter-free
 // and testable.
 
-import { Layout, Rectangle, removeOverlaps } from 'webcola'
+import { Layout, Variable, Constraint, Solver } from 'webcola'
 
 export type ForceEdgeKind = 'parent_child' | 'partner'
 
@@ -95,14 +96,17 @@ export const FAMILY_SIZE = 14
 // deterministic top-down start; it is not a constraint, so the settled layout may
 // depart from it.
 const GEN_GAP = 76
-// Ideal link lengths for the stress term: parent↔family↔child, and the shorter
-// partner link that keeps a couple adjacent.
+// Ideal link lengths for the stress term. STRUCT_LEN spaces parent↔family↔child.
+// PARTNER_LEN is deliberately much shorter than STRUCT_LEN — shorter, in fact,
+// than the enforced no-overlap gap, so the stress term pulls a couple as tight as
+// it's allowed to sit. A tight couple reads as one unit and, crucially, keeps its
+// partner edge short: the family's children then bulge out to one side instead of
+// straddling a long partner line, so descendant edges rarely cross it.
 const STRUCT_LEN = 70
-const PARTNER_LEN = NODE_W * 0.75
-// Extra clearance kept around each *person* box during overlap removal (each is
-// inflated by half of this), beyond the bare no-overlap gap. It gives
-// neighbouring people — and the edges that thread between them — real breathing
-// room, so unrelated branches don't crowd into one another.
+const PARTNER_LEN = NODE_W * 0.35
+// Extra horizontal clearance forced between two *person* boxes beyond the bare
+// no-overlap gap, so neighbouring people — and the edges that thread between
+// them — get real breathing room and unrelated branches don't crowd together.
 const NODE_SEP_PAD = 28
 
 // Fixed iteration budget — enough for a low-hundreds-person family to settle
@@ -293,25 +297,38 @@ export function computeForceLayout(
   }
 }
 
-// Remove every node overlap in place, in both axes. cola's `removeOverlaps`
-// (Dwyer's 2D VPSC) finds the minimal-displacement position for every node so no
-// two boxes overlap — exact and deterministic, and, unlike a single-axis push,
-// it works for the organic 2D spread where overlaps aren't confined to a row.
-// Person boxes are inflated by half of NODE_SEP_PAD each so neighbours keep real
-// breathing room (and their labels don't collide); the small family junctions
-// get the bare gap.
+// Remove every node overlap by separating horizontally, in place. For each pair
+// whose boxes overlap vertically we add a VPSC constraint keeping them at least
+// half their combined widths apart in x (ordered by their current x, so the
+// solver preserves left/right order). VPSC then finds the minimal-displacement x
+// for every node satisfying all of them at once — exact and deterministic.
+//
+// This is a *complete* guarantee for any layout, not just a row-based one: an
+// overlap needs both axes, so once no vertically-overlapping pair overlaps in x,
+// nothing overlaps. Separating in x (never y) also keeps a couple side by side
+// rather than stacking one partner above the other. (cola's 2D `removeOverlaps`
+// does the opposite — it stacks aligned couples vertically, and doesn't separate
+// two boxes sharing a y-centre at all — so we don't use it.)
 function separateOverlaps(nodes: ColaNode[]): void {
-  const rects = nodes.map((n) => {
-    const pad = n.isFamily ? 0 : NODE_SEP_PAD / 2
-    const halfW = n.width / 2 + pad
-    const halfH = n.height / 2 + pad
-    return new Rectangle(n.x - halfW, n.x + halfW, n.y - halfH, n.y + halfH)
-  })
-  removeOverlaps(rects)
-  nodes.forEach((n, i) => {
-    n.x = rects[i].cx()
-    n.y = rects[i].cy()
-  })
+  const vars = nodes.map((n) => new Variable(n.x))
+  const cs: Constraint[] = []
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i]
+      const b = nodes[j]
+      const yOverlap = (a.height + b.height) / 2 - Math.abs(a.y - b.y)
+      if (yOverlap <= 1e-6) continue
+      // Beyond bare non-overlap, give two people extra room so families read as
+      // distinct clusters; a person↔family-junction pair keeps the tight gap.
+      const pad = !a.isFamily && !b.isFamily ? NODE_SEP_PAD : 0
+      const gap = (a.width + b.width) / 2 + pad
+      if (a.x <= b.x) cs.push(new Constraint(vars[i], vars[j], gap))
+      else cs.push(new Constraint(vars[j], vars[i], gap))
+    }
+  }
+  if (cs.length === 0) return
+  new Solver(vars, cs).solve()
+  vars.forEach((v, i) => (nodes[i].x = v.position()))
 }
 
 interface Union {
