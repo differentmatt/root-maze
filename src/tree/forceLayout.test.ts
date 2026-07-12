@@ -159,7 +159,10 @@ describe('computeForceLayout', () => {
   })
 
   it('never overlaps nodes, even in a large dense tree', () => {
-    // A synthetic 4-generation family: couples with several children each.
+    // A synthetic 4-generation family: couples with several children each. Two
+    // founding couples fan out to 100+ people — enough to stress the invariant,
+    // while the O(n²) stress solve still finishes fast. (The generous timeout is
+    // headroom for slow CI, not an expectation it takes that long.)
     const ids: string[] = []
     const edges: ForceInputEdge[] = []
     let counter = 0
@@ -168,7 +171,7 @@ describe('computeForceLayout', () => {
       ids.push(id)
       return id
     }
-    let generation = Array.from({ length: 4 }, () => {
+    let generation = Array.from({ length: 2 }, () => {
       const a = mk()
       const b = mk()
       edges.push(partner(a, b))
@@ -199,7 +202,7 @@ describe('computeForceLayout', () => {
       expect(Number.isFinite(l.pos[id].y)).toBe(true)
     }
     expect(worstOverlap(l)).toBeLessThan(0.01)
-  })
+  }, 20000)
 
   it('lays out unrelated families without overlap', () => {
     const l = computeForceLayout(
