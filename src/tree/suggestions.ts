@@ -9,6 +9,10 @@ export interface ParentSuggestion {
   // The already-known parent this suggestion is the partner of, for a hint like
   // "partner of Ada — likely other parent".
   viaParentName: string
+  // The subtype of the via-parent's parent_child edge (biological, step,
+  // adoptive, foster). Adding the suggested parent should mirror this rather
+  // than defaulting to biological.
+  subtype: string
 }
 
 // Likely "other parents" for a person: partners of the person's existing
@@ -22,10 +26,15 @@ export function suggestOtherParents(
   const nameOf = (id: string) =>
     graph.nodes.find((n) => n.nodeId === id)?.name ?? '?'
 
-  const parents = graph.edges
-    .filter((e) => e.edgeKind === 'parent_child' && e.toPerson === personId)
-    .map((e) => e.fromPerson)
-  const parentSet = new Set(parents)
+  // Keep the parent's edge subtype so a suggested "other parent" can mirror it
+  // (a step-parent's partner is likely also a step-parent, etc.).
+  const subtypeOfParent = new Map<string, string>()
+  for (const e of graph.edges) {
+    if (e.edgeKind === 'parent_child' && e.toPerson === personId) {
+      subtypeOfParent.set(e.fromPerson, e.subtype)
+    }
+  }
+  const parentSet = new Set(subtypeOfParent.keys())
   if (parentSet.size === 0) return []
 
   const partnersOf = (id: string) =>
@@ -55,6 +64,7 @@ export function suggestOtherParents(
         nodeId: partnerId,
         name: nameOf(partnerId),
         viaParentName: nameOf(parentId),
+        subtype: subtypeOfParent.get(parentId) ?? '',
       })
     }
   }

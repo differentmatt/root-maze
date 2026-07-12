@@ -1149,12 +1149,16 @@ function RelationshipsSection({
   }
 
   // One-tap add for a suggested other parent: the suggestion is a parent of this
-  // person, i.e. a `child_of` edge with the default subtype.
-  async function addSuggestedParent(nodeId: string) {
+  // person, i.e. a `child_of` edge. Mirror the existing parent's subtype (the
+  // one this suggestion is the partner of) rather than defaulting to biological.
+  async function addSuggestedParent(nodeId: string, subtype: string) {
     setBusyId(nodeId)
     setError(null)
     try {
-      await createEdge(groupId, buildEdgeInput('child_of', person.nodeId, nodeId, ''))
+      await createEdge(
+        groupId,
+        buildEdgeInput('child_of', person.nodeId, nodeId, subtype),
+      )
       onChanged()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add')
@@ -1223,7 +1227,7 @@ function RelationshipsSection({
                   </span>
                 </span>
                 <button
-                  onClick={() => addSuggestedParent(s.nodeId)}
+                  onClick={() => addSuggestedParent(s.nodeId, s.subtype)}
                   disabled={busyId === s.nodeId}
                   className="flex shrink-0 items-center gap-1.5 rounded-md border border-sky-800 px-2 py-1 text-xs text-sky-200 hover:bg-sky-900/40 disabled:opacity-40"
                 >

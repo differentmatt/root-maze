@@ -21,14 +21,14 @@ function node(nodeId: string, name: string): PersonNode {
   }
 }
 
-function parentEdge(parent: string, child: string): Edge {
+function parentEdge(parent: string, child: string, subtype = 'biological'): Edge {
   return {
     edgeId: `pc_${parent}_${child}`,
     groupId: 'g',
     edgeKind: 'parent_child',
     fromPerson: parent,
     toPerson: child,
-    subtype: 'biological',
+    subtype,
     startDate: null,
     endDate: null,
     createdAt: 't',
@@ -61,7 +61,21 @@ describe('suggestOtherParents', () => {
       edges: [parentEdge('ada', 'kid'), partnerEdge('ada', 'bob')],
     }
     const out = suggestOtherParents(graph, 'kid')
-    expect(out).toEqual([{ nodeId: 'bob', name: 'Bob', viaParentName: 'Ada' }])
+    expect(out).toEqual([
+      { nodeId: 'bob', name: 'Bob', viaParentName: 'Ada', subtype: 'biological' },
+    ])
+  })
+
+  it('mirrors the existing parent edge subtype', () => {
+    // Ada is Kid's step-parent; her partner Bob is a likely step-parent too.
+    const graph: Graph = {
+      nodes: [node('kid', 'Kid'), node('ada', 'Ada'), node('bob', 'Bob')],
+      edges: [parentEdge('ada', 'kid', 'step'), partnerEdge('ada', 'bob')],
+    }
+    const out = suggestOtherParents(graph, 'kid')
+    expect(out).toEqual([
+      { nodeId: 'bob', name: 'Bob', viaParentName: 'Ada', subtype: 'step' },
+    ])
   })
 
   it('returns nothing when the person has no parents', () => {
