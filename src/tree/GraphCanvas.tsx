@@ -386,6 +386,20 @@ export default function GraphCanvas({
           >
             <path d="M0,1 L9,5 L0,9" fill="none" stroke="#7dd3fc" strokeWidth="2" />
           </marker>
+          {/* A smaller chevron placed mid-edge on graph-mode descendant lines to
+              show lineage direction (parent→child), which a force layout — unlike
+              a strict top-down tree — can't convey by position alone. */}
+          <marker
+            id="lineage"
+            viewBox="0 0 10 10"
+            refX="6"
+            refY="5"
+            markerWidth="4.5"
+            markerHeight="4.5"
+            orient="auto"
+          >
+            <path d="M0,1 L9,5 L0,9" fill="none" stroke="#7dd3fc" strokeWidth="2.2" />
+          </marker>
         </defs>
 
         <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
@@ -417,15 +431,30 @@ export default function GraphCanvas({
                     const s = pcSubtype.get(`${pid}>${cid}`)
                     return s && s !== 'biological'
                   })
+                  // A short, invisible chord over the middle of the curve carries
+                  // the lineage arrowhead, oriented along the curve toward the
+                  // child (junction=(f.x,f.y), control=(f.x,b.y), child=(b.x,b.y)).
+                  const t1 = quadPoint(f.x, f.y, f.x, b.y, b.x, b.y, 0.48)
+                  const t2 = quadPoint(f.x, f.y, f.x, b.y, b.x, b.y, 0.6)
                   return (
-                    <path
-                      key={`${f.id}>${cid}`}
-                      d={`M ${f.x} ${f.y} Q ${f.x} ${b.y} ${b.x} ${b.y}`}
-                      fill="none"
-                      stroke="#38bdf8"
-                      strokeWidth={1.75}
-                      strokeDasharray={nonBio ? '5 4' : undefined}
-                    />
+                    <g key={`${f.id}>${cid}`}>
+                      <path
+                        d={`M ${f.x} ${f.y} Q ${f.x} ${b.y} ${b.x} ${b.y}`}
+                        fill="none"
+                        stroke="#38bdf8"
+                        strokeWidth={1.75}
+                        strokeDasharray={nonBio ? '5 4' : undefined}
+                      />
+                      <line
+                        x1={t1.x}
+                        y1={t1.y}
+                        x2={t2.x}
+                        y2={t2.y}
+                        stroke="#38bdf8"
+                        strokeWidth={1.75}
+                        markerEnd="url(#lineage)"
+                      />
+                    </g>
                   )
                 })}
                 <circle cx={f.x} cy={f.y} r={4} fill="#52525b" />
@@ -610,6 +639,24 @@ export default function GraphCanvas({
       </div>
     </div>
   )
+}
+
+// A point at parameter t on the quadratic Bézier (M, C, E) — used to place the
+// mid-edge lineage arrow on a family→child curve.
+function quadPoint(
+  mx: number,
+  my: number,
+  cx: number,
+  cy: number,
+  ex: number,
+  ey: number,
+  t: number,
+): { x: number; y: number } {
+  const mt = 1 - t
+  return {
+    x: mt * mt * mx + 2 * mt * t * cx + t * t * ex,
+    y: mt * mt * my + 2 * mt * t * cy + t * t * ey,
+  }
 }
 
 function ControlButton({

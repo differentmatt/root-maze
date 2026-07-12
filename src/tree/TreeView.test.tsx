@@ -276,6 +276,58 @@ describe('TreeView', () => {
     expect(container.querySelector('path[stroke-dasharray="5 4"]')).not.toBeNull()
   })
 
+  it('marks lineage direction with a mid-edge arrow on each descendant line in Graph mode', async () => {
+    vi.mocked(getGraph).mockResolvedValue({
+      nodes: [
+        person('nod_a', 'Ada'),
+        person('nod_b', 'Bo'),
+        person('nod_c', 'Cy'),
+        person('nod_d', 'Di'),
+      ],
+      edges: [
+        {
+          edgeId: 'edg_partner',
+          groupId: 'grp_1',
+          edgeKind: 'partner',
+          fromPerson: 'nod_a',
+          toPerson: 'nod_b',
+          subtype: 'married',
+          startDate: null,
+          endDate: null,
+          createdAt: 't',
+          updatedAt: 't',
+          updatedBy: 'acc_1',
+        },
+        ...['nod_c', 'nod_d'].flatMap((child, i) =>
+          ['nod_a', 'nod_b'].map((parent, j) => ({
+            edgeId: `edg_pc_${i}_${j}`,
+            groupId: 'grp_1',
+            edgeKind: 'parent_child' as const,
+            fromPerson: parent,
+            toPerson: child,
+            subtype: 'biological',
+            startDate: null,
+            endDate: null,
+            createdAt: 't',
+            updatedAt: 't',
+            updatedBy: 'acc_1',
+          })),
+        ),
+      ],
+    })
+    const { container } = render(<TreeView group={group} />)
+
+    await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Graph' }))
+
+    // The arrow marker is defined, and there is one lineage arrow per
+    // family→child line (Ada+Bo → Cy and → Di = two children = two arrows).
+    expect(container.querySelector('marker#lineage')).not.toBeNull()
+    expect(
+      container.querySelectorAll('line[marker-end="url(#lineage)"]'),
+    ).toHaveLength(2)
+  })
+
   it('renders partner edges as consistently bowed quadratic paths regardless of endpoint order', async () => {
     vi.mocked(getGraph).mockResolvedValue({
       nodes: [person('nod_a', 'Ada'), person('nod_b', 'Bo'), person('nod_c', 'Cy')],
