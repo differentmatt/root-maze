@@ -18,6 +18,7 @@ import {
   type PersonNode,
 } from '../api'
 import PersonPicker from '../components/PersonPicker'
+import { rankLinkCandidates } from '../components/personRanking'
 
 type Status = 'loading' | 'ready' | 'error'
 
@@ -264,10 +265,6 @@ function MemberLink({
   onLink: (nodeId: string) => void
   onUnlink: () => void
 }) {
-  const candidates = nodes.filter(
-    (n) => !n.accountId || n.accountId === member.accountId,
-  )
-
   if (!canEdit) {
     return (
       <p className="text-xs text-zinc-500">
@@ -282,13 +279,32 @@ function MemberLink({
     )
   }
 
+  const candidates = nodes.filter(
+    (n) => !n.accountId || n.accountId === member.accountId,
+  )
+  // Float the people whose name/email look like this member to the top.
+  const ranked = rankLinkCandidates(member, candidates)
+  const options = [
+    ...ranked.suggested.map((s) => ({
+      id: s.node.nodeId,
+      label: s.node.name,
+      hint: s.hint,
+      section: 'suggested' as const,
+    })),
+    ...ranked.rest.map((n) => ({
+      id: n.nodeId,
+      label: n.name,
+      section: 'all' as const,
+    })),
+  ]
+
   return (
     <div className="flex items-center gap-2">
       <label className="shrink-0 text-xs text-zinc-500">Person</label>
       <div className="min-w-0 flex-1">
         <PersonPicker
           ariaLabel={`Linked person for ${member.name || member.email || member.accountId}`}
-          options={candidates.map((n) => ({ id: n.nodeId, label: n.name }))}
+          options={options}
           value={member.linkedNodeId ?? null}
           disabled={busy || disabled}
           clearLabel="— not linked —"

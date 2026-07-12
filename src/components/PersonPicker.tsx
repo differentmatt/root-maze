@@ -17,6 +17,38 @@ export interface PickerOption {
   label: string
   // Optional dimmer second line (e.g. an email, or "likely other parent").
   hint?: string
+  // Optional grouping. When any option carries a section, the list renders a
+  // small header before each non-empty group ("Suggested" pinned above "All
+  // people") and keeps the suggested rows on top even while filtering. Options
+  // with no section fall into "all". If no option has a section, the picker
+  // renders a single flat list exactly as before.
+  section?: 'suggested' | 'all'
+}
+
+const SECTION_LABELS: Record<'suggested' | 'all', string> = {
+  suggested: 'Suggested',
+  all: 'All people',
+}
+
+// Rank substring matches so the closest hit floats up: a prefix match beats a
+// word-start match beats a mid-word match. Ties keep the caller's order (stable
+// by original index). Returns null when the query doesn't match at all.
+function queryScore(label: string, q: string): number | null {
+  const l = label.toLowerCase()
+  const i = l.indexOf(q)
+  if (i === -1) return null
+  if (i === 0) return 3
+  if (/\s/.test(l[i - 1] ?? '')) return 2
+  return 1
+}
+
+function rankByQuery(list: PickerOption[], q: string): PickerOption[] {
+  if (!q) return list
+  return list
+    .map((o, i) => ({ o, i, s: queryScore(o.label, q) }))
+    .filter((x) => x.s !== null)
+    .sort((a, b) => (b.s as number) - (a.s as number) || a.i - b.i)
+    .map((x) => x.o)
 }
 
 const triggerClass =
@@ -52,16 +84,30 @@ export default function PersonPicker({
 
   const selected = options.find((o) => o.id === value) ?? null
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return options
-    return options.filter((o) => o.label.toLowerCase().includes(q))
-  }, [options, query])
+  const hasSections = useMemo(() => options.some((o) => o.section), [options])
 
-  // Rows the keyboard can land on: the optional clear row, then the matches.
+  // Group first (so "Suggested" stays pinned above everyone else regardless of
+  // the query), then rank each group's matches by the query. When no option is
+  // sectioned this collapses to a single query-ranked list.
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!hasSections) {
+      return [{ section: null as null, items: rankByQuery(options, q) }]
+    }
+    return (['suggested', 'all'] as const).map((section) => ({
+      section,
+      items: rankByQuery(
+        options.filter((o) => (o.section ?? 'all') === section),
+        q,
+      ),
+    }))
+  }, [options, query, hasSections])
+
+  // Rows the keyboard can land on: the optional clear row, then every group's
+  // matches in display order (section headers are not selectable).
   const rows: Array<{ id: string | null; label: string; hint?: string }> = [
     ...(clearLabel ? [{ id: null, label: clearLabel }] : []),
-    ...filtered,
+    ...groups.flatMap((g) => g.items),
   ]
 
   // Focus the filter box on open, and keep the active row in range.
@@ -105,6 +151,70 @@ export default function PersonPicker({
   function choose(id: string | null) {
     onChange(id)
     setOpen(false)
+  }
+
+  function renderOption(
+    row: { id: string | null; label: string; hint?: string },
+    i: number,
+  ) {
+    const isActive = i === active
+    const isSelected =
+      row.id === value || (row.id === null && value == null && !!clearLabel)
+    return (
+      // The option element is itself the click target — no nested button — so
+      // aria-selected sits on what the user interacts with. Keyboard activation
+      // goes through the combobox input's onKeyDown + aria-activedescendant.
+      <li
+        key={row.id ?? '__clear__'}
+        id={optionId(i)}
+        role="option"
+        aria-selected={isSelected}
+        onMouseEnter={() => setActive(i)}
+        onClick={() => choose(row.id)}
+        className={`flex cursor-pointer flex-col items-start px-3 py-2 text-sm ${
+          isActive ? 'bg-zinc-800' : ''
+        } ${row.id === null ? 'text-zinc-400' : 'text-zinc-100'}`}
+      >
+        <span className="w-full truncate">{row.label}</span>
+        {row.hint && (
+          <span className="w-full truncate text-xs text-zinc-500">
+            {row.hint}
+          </span>
+        )}
+      </li>
+    )
+  }
+
+  // Walk the clear row + grouped matches, emitting a non-selectable header
+  // before each non-empty section. The running `idx` mirrors each option's
+  // position in `rows`, so keyboard nav (which indexes `rows`) stays aligned.
+  function renderRows() {
+    const els: React.ReactNode[] = []
+    let idx = 0
+    if (clearLabel) {
+      els.push(renderOption(rows[0], idx))
+      idx += 1
+    }
+    for (const g of groups) {
+      if (g.items.length === 0) continue
+      if (hasSections && g.section) {
+        els.push(
+          <li
+            key={`__section-${g.section}`}
+            role="presentation"
+            aria-hidden
+            className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-zinc-500"
+          >
+            {SECTION_LABELS[g.section]}
+          </li>,
+        )
+      }
+      for (const item of g.items) {
+        els.push(renderOption(item, idx))
+        idx += 1
+      }
+    }
+    return els
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -175,36 +285,7 @@ export default function PersonPicker({
             {rows.length === 0 ? (
               <li className="px-3 py-2 text-sm text-zinc-500">No matches</li>
             ) : (
-              rows.map((row, i) => {
-                const isActive = i === active
-                const isSelected =
-                  row.id === value ||
-                  (row.id === null && value == null && !!clearLabel)
-                return (
-                  // The option element is itself the click target — no nested
-                  // button — so aria-selected sits on what the user interacts
-                  // with. Keyboard activation goes through the combobox input's
-                  // onKeyDown + aria-activedescendant above.
-                  <li
-                    key={row.id ?? '__clear__'}
-                    id={optionId(i)}
-                    role="option"
-                    aria-selected={isSelected}
-                    onMouseEnter={() => setActive(i)}
-                    onClick={() => choose(row.id)}
-                    className={`flex cursor-pointer flex-col items-start px-3 py-2 text-sm ${
-                      isActive ? 'bg-zinc-800' : ''
-                    } ${row.id === null ? 'text-zinc-400' : 'text-zinc-100'}`}
-                  >
-                    <span className="w-full truncate">{row.label}</span>
-                    {row.hint && (
-                      <span className="w-full truncate text-xs text-zinc-500">
-                        {row.hint}
-                      </span>
-                    )}
-                  </li>
-                )
-              })
+              renderRows()
             )}
           </ul>
         </div>

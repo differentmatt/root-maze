@@ -23,6 +23,7 @@ import { inferSiblings, type InferredSibling } from './siblings'
 import { suggestOtherParents, type ParentSuggestion } from './suggestions'
 import { fullName, bornSuffix, namePartsOf } from './names'
 import PersonPicker from '../components/PersonPicker'
+import { rankRelationshipCandidates } from '../components/personRanking'
 
 type Status =
   | { state: 'loading' }
@@ -404,6 +405,8 @@ function DateField({
 
 // Controlled fields for choosing a relationship relative to a reference person.
 function RelationshipFields({
+  graph,
+  person,
   choice,
   setChoice,
   otherId,
@@ -412,6 +415,8 @@ function RelationshipFields({
   setSubtype,
   candidates,
 }: {
+  graph: Graph
+  person: PersonNode
   choice: RelChoice
   setChoice: (c: RelChoice) => void
   otherId: string
@@ -421,6 +426,23 @@ function RelationshipFields({
   candidates: PersonNode[]
 }) {
   const subs = subtypesFor(choice)
+  // Order the picker by who's most likely, given the relationship being added.
+  const options = useMemo(() => {
+    const ranked = rankRelationshipCandidates(graph, person, choice, candidates)
+    return [
+      ...ranked.suggested.map((s) => ({
+        id: s.node.nodeId,
+        label: s.node.name,
+        hint: s.hint,
+        section: 'suggested' as const,
+      })),
+      ...ranked.rest.map((n) => ({
+        id: n.nodeId,
+        label: n.name,
+        section: 'all' as const,
+      })),
+    ]
+  }, [graph, person, choice, candidates])
   return (
     <div className="flex flex-col gap-2">
       <div className="flex gap-2">
@@ -443,7 +465,7 @@ function RelationshipFields({
         <div className="min-w-0 flex-1">
           <PersonPicker
             ariaLabel="Select person"
-            options={candidates.map((p) => ({ id: p.nodeId, label: p.name }))}
+            options={options}
             value={otherId || null}
             onChange={(id) => setOtherId(id ?? '')}
           />
@@ -874,6 +896,7 @@ function PersonPanel({
         <p className="mb-2 text-sm font-medium text-zinc-300">Relationships</p>
         <RelationshipsSection
           groupId={groupId}
+          graph={graph}
           person={person}
           myEdges={myEdges}
           names={names}
@@ -1092,6 +1115,7 @@ function describeEdge(edge: Edge, personId: string, names: Record<string, string
 
 function RelationshipsSection({
   groupId,
+  graph,
   person,
   myEdges,
   names,
@@ -1101,6 +1125,7 @@ function RelationshipsSection({
   onChanged,
 }: {
   groupId: string
+  graph: Graph
   person: PersonNode
   myEdges: Edge[]
   names: Record<string, string>
@@ -1243,6 +1268,8 @@ function RelationshipsSection({
       {candidates.length > 0 ? (
         <div className="flex flex-col gap-2">
           <RelationshipFields
+            graph={graph}
+            person={person}
             choice={choice}
             setChoice={setChoice}
             otherId={otherId}
