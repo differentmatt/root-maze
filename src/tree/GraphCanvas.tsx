@@ -187,18 +187,6 @@ export default function GraphCanvas({
   }, [layoutKey])
   const pos = layout.pos
 
-  // Parent→child subtype keyed "from>to", so graph-mode family→child edges can
-  // dash a step/adoptive/foster link (the junction hides the individual edge).
-  const pcSubtype = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const e of edges) {
-      if (e.edgeKind === 'parent_child') {
-        m.set(`${e.fromPerson}>${e.toPerson}`, e.subtype)
-      }
-    }
-    return m
-  }, [edges])
-
   // The scale that fits the whole current layout, allowed below the interactive
   // floor (down to ABS_MIN_K) so even a very wide/tall tree fits fully.
   const wholeFitK = useMemo(() => {
@@ -427,15 +415,11 @@ export default function GraphCanvas({
                 {f.children.map((cid) => {
                   const b = pos[cid]
                   if (!b) return null
-                  const nonBio = f.parents.some((pid) => {
-                    const s = pcSubtype.get(`${pid}>${cid}`)
-                    return s && s !== 'biological'
-                  })
-                  // A short chord over the middle of the curve carries the lineage
-                  // arrowhead, oriented along the curve toward the child
-                  // (junction=(f.x,f.y), control=(f.x,b.y), child=(b.x,b.y)). The
-                  // chord itself is unstroked — only the marker paints (it has its
-                  // own stroke) — so it never fills in a dashed edge's gaps.
+                  // Every descendant line renders identically (solid sky) — the
+                  // graph view doesn't distinguish adoptive/foster/step from
+                  // biological. A short chord over the middle of the curve carries
+                  // the lineage arrowhead, oriented along the curve toward the
+                  // child (junction=(f.x,f.y), control=(f.x,b.y), child=(b.x,b.y)).
                   const t1 = quadPoint(f.x, f.y, f.x, b.y, b.x, b.y, 0.48)
                   const t2 = quadPoint(f.x, f.y, f.x, b.y, b.x, b.y, 0.6)
                   return (
@@ -445,7 +429,6 @@ export default function GraphCanvas({
                         fill="none"
                         stroke="#38bdf8"
                         strokeWidth={1.75}
-                        strokeDasharray={nonBio ? '5 4' : undefined}
                       />
                       <line
                         x1={t1.x}

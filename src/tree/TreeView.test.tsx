@@ -212,7 +212,7 @@ describe('TreeView', () => {
     )
   })
 
-  it('renders family junctions and dashed non-biological edges in Graph mode', async () => {
+  it('renders family junctions and draws every descendant edge the same (no dashing by subtype) in Graph mode', async () => {
     vi.mocked(getGraph).mockResolvedValue({
       nodes: [
         person('nod_a', 'Ada'),
@@ -273,7 +273,13 @@ describe('TreeView', () => {
       'true',
     )
     expect(container.querySelector('circle[r="4"][fill="#52525b"]')).not.toBeNull()
-    expect(container.querySelector('path[stroke-dasharray="5 4"]')).not.toBeNull()
+    // Cy is a foster child of both Ada and Bo, but descendant edges no longer
+    // vary by subtype — the family→child curves render solid, like every other.
+    const descendantCurves = container.querySelectorAll('path[stroke="#38bdf8"]')
+    expect(descendantCurves.length).toBeGreaterThan(0)
+    for (const path of Array.from(descendantCurves)) {
+      expect(path.getAttribute('stroke-dasharray')).toBeNull()
+    }
   })
 
   it('marks lineage direction with a mid-edge arrow on each descendant line in Graph mode', async () => {
