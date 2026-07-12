@@ -88,9 +88,14 @@ export const FAMILY_SIZE = 14
 // children — comfortably more than a node is tall, which is what confines every
 // overlap to a single level). Ideal link lengths for the stress term; partners
 // sit closer.
-const GEN_GAP = 64
+const GEN_GAP = 76
 const STRUCT_LEN = 70
 const PARTNER_LEN = NODE_W * 0.75
+// Extra horizontal clearance forced between two *person* boxes beyond the bare
+// no-overlap gap. The overlap-separation pass only stops boxes from touching;
+// this padding gives neighbouring people (and the edges that thread between
+// them) real breathing room, so unrelated families don't crowd into one another.
+const NODE_SEP_PAD = 28
 
 // Fixed iteration budget — enough for a low-hundreds-person family to settle
 // while staying fully deterministic. Phases: unconstrained stress (spread),
@@ -311,7 +316,10 @@ function separateOverlaps(nodes: ColaNode[]): void {
       const b = nodes[j]
       const yOverlap = (a.height + b.height) / 2 - Math.abs(a.y - b.y)
       if (yOverlap <= 1e-6) continue
-      const gap = (a.width + b.width) / 2
+      // Beyond bare non-overlap, give two people extra room so families read as
+      // distinct clusters; a person↔family-junction pair keeps the tight gap.
+      const pad = !a.isFamily && !b.isFamily ? NODE_SEP_PAD : 0
+      const gap = (a.width + b.width) / 2 + pad
       if (a.x <= b.x) cs.push(new Constraint(vars[i], vars[j], gap))
       else cs.push(new Constraint(vars[j], vars[i], gap))
     }

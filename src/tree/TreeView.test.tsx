@@ -42,6 +42,15 @@ function person(nodeId: string, name: string) {
   }
 }
 
+function quadPath(path: SVGPathElement) {
+  const d = path.getAttribute('d') ?? ''
+  expect(d).toContain(' Q ')
+  const nums = d.match(/-?\d+(?:\.\d+)?/g)?.map(Number)
+  expect(nums).toHaveLength(6)
+  const [x1, y1, mx, my, x2, y2] = nums!
+  return { x1, y1, mx, my, x2, y2 }
+}
+
 const graph: Graph = {
   nodes: [person('nod_a', 'Ada'), person('nod_b', 'Bo')],
   edges: [
@@ -265,6 +274,55 @@ describe('TreeView', () => {
     )
     expect(container.querySelector('circle[r="4"][fill="#52525b"]')).not.toBeNull()
     expect(container.querySelector('path[stroke-dasharray="5 4"]')).not.toBeNull()
+  })
+
+  it('renders partner edges as consistently bowed quadratic paths regardless of endpoint order', async () => {
+    vi.mocked(getGraph).mockResolvedValue({
+      nodes: [person('nod_a', 'Ada'), person('nod_b', 'Bo'), person('nod_c', 'Cy')],
+      edges: [
+        {
+          edgeId: 'edg_left',
+          groupId: 'grp_1',
+          edgeKind: 'partner',
+          fromPerson: 'nod_b',
+          toPerson: 'nod_a',
+          subtype: 'married',
+          startDate: null,
+          endDate: null,
+          createdAt: 't',
+          updatedAt: 't',
+          updatedBy: 'acc_1',
+        },
+        {
+          edgeId: 'edg_right',
+          groupId: 'grp_1',
+          edgeKind: 'partner',
+          fromPerson: 'nod_c',
+          toPerson: 'nod_b',
+          subtype: 'married',
+          startDate: null,
+          endDate: null,
+          createdAt: 't',
+          updatedAt: 't',
+          updatedBy: 'acc_1',
+        },
+      ],
+    })
+    const { container } = render(<TreeView group={group} />)
+
+    await waitFor(() => expect(screen.getByText('Ada')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Graph' }))
+
+    await waitFor(() =>
+      expect(container.querySelectorAll('path[stroke="#fb7185"]')).toHaveLength(2),
+    )
+    for (const path of Array.from(container.querySelectorAll<SVGPathElement>('path[stroke="#fb7185"]'))) {
+      const { x1, y1, mx, my, x2, y2 } = quadPath(path)
+      const midX = (x1 + x2) / 2
+      const midY = (y1 + y2) / 2
+      expect(my).toBeLessThanOrEqual(midY + 0.01)
+      if (Math.abs(my - midY) <= 0.01) expect(mx).toBeGreaterThan(midX)
+    }
   })
 
   it('hides "This is me" when the caller is already linked elsewhere', async () => {
