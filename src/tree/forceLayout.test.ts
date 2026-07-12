@@ -184,6 +184,52 @@ describe('computeForceLayout', () => {
     }
   })
 
+  it('keeps two independent couples from interleaving', () => {
+    // partners (a,b) and (c,d), cross-linked by children (a&c co-parent one kid,
+    // b&d another) so cola pulls a,c together and b,d together — which without
+    // de-interleaving settles them as a c b d, crossing both partner edges.
+    const ids = ['a', 'b', 'c', 'd', 'ac', 'bd']
+    const l = computeForceLayout(ids, [
+      partner('a', 'b'),
+      partner('c', 'd'),
+      pc('a', 'ac'),
+      pc('c', 'ac'),
+      pc('b', 'bd'),
+      pc('d', 'bd'),
+    ])
+    // The four parents share a row. No non-partner may sit horizontally between
+    // a couple, so each couple stays contiguous.
+    const row = ['a', 'b', 'c', 'd']
+      .map((id) => ({ id, x: l.pos[id].x }))
+      .sort((p, q) => p.x - q.x)
+      .map((p) => p.id)
+    const between = (x: string, y: string) => {
+      const i = row.indexOf(x)
+      const j = row.indexOf(y)
+      return Math.abs(i - j) === 1
+    }
+    expect(between('a', 'b')).toBe(true)
+    expect(between('c', 'd')).toBe(true)
+  })
+
+  it('centers a multi-partner hub among its partners', () => {
+    // A hub with three partners on one row must sit in the middle so no partner
+    // edge crosses another partner — mirroring the layered layout's rule.
+    const ids = ['p1', 'hub', 'p2', 'p3']
+    const l = computeForceLayout(ids, [
+      partner('hub', 'p1'),
+      partner('hub', 'p2'),
+      partner('hub', 'p3'),
+    ])
+    const order = ['p1', 'p2', 'p3', 'hub']
+      .map((id) => ({ id, x: l.pos[id].x }))
+      .sort((p, q) => p.x - q.x)
+      .map((p) => p.id)
+    const hubAt = order.indexOf('hub')
+    expect(hubAt).toBeGreaterThan(0)
+    expect(hubAt).toBeLessThan(order.length - 1)
+  })
+
   it('never overlaps nodes, even in a large dense tree', () => {
     // A synthetic 4-generation family: couples with several children each. Two
     // founding couples fan out to 100+ people — enough to stress the invariant,

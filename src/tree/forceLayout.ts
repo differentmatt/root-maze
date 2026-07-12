@@ -26,7 +26,10 @@
 // edge per pair, each union (a couple / co-parent-set and their shared children)
 // gets a virtual "family node", and edges route parent→family→child. That keeps
 // full siblings clustered under one junction and the edge set sparse. A short
-// partner link between spouses keeps couples adjacent.
+// partner link between spouses pulls couples together, but that soft force alone
+// lets two independent couples settle interleaved (a c b d) so their partner
+// edges cross; a deterministic de-interleave pass (before separation) reorders
+// each generation so every partner group stays a contiguous, non-crossing span.
 //
 // Determinism — cola seeds its descent from a fixed PRNG, we seed each node's
 // initial position from a cheap generation estimate, run a fixed number of
@@ -253,7 +256,11 @@ export function computeForceLayout(
   layout.start(UNCONSTRAINED_ITERS, USER_ITERS, ALL_ITERS, 0, false)
 
   const settled = layout.nodes() as unknown as ColaNode[]
-  separateOverlaps(settled)
+  // Stop partner pairs interleaving (see deinterleavePartners), then remove every
+  // overlap — the de-interleaved same-generation order is fed into the pass so it
+  // survives separation instead of drifting back.
+  const sameGenNeighbours = deinterleavePartners(settled, gen, partners)
+  separateOverlaps(settled, sameGenNeighbours)
 
   // --- Collect results -----------------------------------------------------
   const pos: Record<string, Point> = {}
@@ -307,7 +314,17 @@ export function computeForceLayout(
 // This is a *complete* guarantee: an overlap needs both axes, so once no
 // vertically-overlapping pair overlaps in x, nothing overlaps. It leaves y
 // untouched, so the generational flow cola settled on is preserved exactly.
-function separateOverlaps(nodes: ColaNode[]): void {
+//
+// `sameGenNeighbours` are consecutive [left, right] person pairs from the
+// de-interleaved per-generation order (see deinterleavePartners). They get the
+// same padded gap even when they don't vertically overlap, so a couple's order
+// is locked in — a partner cola floated to a slightly different row can't drift
+// back across its neighbour and re-interleave. Left→right matches the permuted
+// x, so these stay consistent (a DAG) with the pairwise constraints above.
+function separateOverlaps(
+  nodes: ColaNode[],
+  sameGenNeighbours: Array<[number, number]> = [],
+): void {
   const vars = nodes.map((n) => new Variable(n.x))
   const cs: Constraint[] = []
   for (let i = 0; i < nodes.length; i++) {
@@ -324,9 +341,119 @@ function separateOverlaps(nodes: ColaNode[]): void {
       else cs.push(new Constraint(vars[j], vars[i], gap))
     }
   }
+  for (const [li, ri] of sameGenNeighbours) {
+    const a = nodes[li]
+    const b = nodes[ri]
+    const gap = (a.width + b.width) / 2 + NODE_SEP_PAD
+    cs.push(new Constraint(vars[li], vars[ri], gap))
+  }
   if (cs.length === 0) return
   new Solver(vars, cs).solve()
   vars.forEach((v, i) => (nodes[i].x = v.position()))
+}
+
+// Stop partner pairs interleaving. cola positions people by soft forces only, so
+// two independent couples can settle interleaved on a row (a c b d), which leaves
+// each partner edge crossing the other couple and cutting through the people
+// between them — what reads on screen as partners "overlapping". Within each
+// generation we reorder people so every partner-connected group (a couple, or a
+// multi-partner hub) occupies a contiguous span, then hand the resulting
+// left→right order to the separation pass to lock it in.
+//
+// Deterministic and structure-preserving: groups are ordered by their settled
+// centre and members by settled x, and only *who sits in each existing x slot*
+// changes — the row keeps its footprint and every y (so the generational flow)
+// is untouched. Returns the consecutive same-generation [left, right] index
+// pairs for separateOverlaps.
+function deinterleavePartners(
+  nodes: ColaNode[],
+  gen: Map<string, number>,
+  partners: Map<string, string[]>,
+): Array<[number, number]> {
+  const indexById = new Map(nodes.map((n, i) => [n.id, i]))
+  const byGen = new Map<number, ColaNode[]>()
+  for (const n of nodes) {
+    if (n.isFamily) continue
+    const g = gen.get(n.id) ?? 0
+    const bucket = byGen.get(g)
+    if (bucket) bucket.push(n)
+    else byGen.set(g, [n])
+  }
+
+  const consecutive: Array<[number, number]> = []
+  for (const g of [...byGen.keys()].sort((a, b) => a - b)) {
+    const row = byGen.get(g)!
+    if (row.length < 2) continue
+    row.sort((a, b) => a.x - b.x || (a.id < b.id ? -1 : 1))
+    // The x slots this row already occupies; we only permute who sits where.
+    const slots = row.map((n) => n.x)
+    const inRow = new Set(row.map((n) => n.id))
+
+    // Partner-connected groups within the row (BFS over partner edges).
+    const groupOf = new Map<string, number>()
+    const groups: ColaNode[][] = []
+    for (const n of row) {
+      if (groupOf.has(n.id)) continue
+      const members: ColaNode[] = []
+      groups.push(members)
+      const queue = [n]
+      groupOf.set(n.id, groups.length - 1)
+      while (queue.length) {
+        const cur = queue.shift()!
+        members.push(cur)
+        for (const pid of partners.get(cur.id) ?? []) {
+          if (inRow.has(pid) && !groupOf.has(pid)) {
+            groupOf.set(pid, groups.length - 1)
+            queue.push(nodes[indexById.get(pid)!])
+          }
+        }
+      }
+    }
+    if (groups.length === row.length) continue // no partners in this row
+
+    // Order members within each group (hub centred), groups by their centre.
+    const ordered = groups
+      .map((members) => ({
+        members: orderPartnerGroup(members, partners),
+        key: avg(members.map((m) => m.x)),
+      }))
+      .sort((a, b) => a.key - b.key)
+      .flatMap((entry) => entry.members)
+
+    ordered.forEach((n, i) => (n.x = slots[i]))
+    for (let i = 1; i < ordered.length; i++) {
+      consecutive.push([
+        indexById.get(ordered[i - 1].id)!,
+        indexById.get(ordered[i].id)!,
+      ])
+    }
+  }
+  return consecutive
+}
+
+// Order a partner-connected group so it reads without a crossing: a plain couple
+// keeps left-right order; a hub with several partners sits in the middle with its
+// partners split to either side. Mirrors the layered layout's rule so the two
+// views agree.
+function orderPartnerGroup(
+  members: ColaNode[],
+  partners: Map<string, string[]>,
+): ColaNode[] {
+  const byX = [...members].sort((a, b) => a.x - b.x || (a.id < b.id ? -1 : 1))
+  if (byX.length < 3) return byX
+  const inGroup = new Set(byX.map((n) => n.id))
+  let hub = byX[0]
+  let maxDeg = -1
+  for (const n of byX) {
+    const deg = (partners.get(n.id) ?? []).filter((p) => inGroup.has(p)).length
+    if (deg > maxDeg) {
+      maxDeg = deg
+      hub = n
+    }
+  }
+  const others = byX.filter((n) => n.id !== hub.id)
+  const half = Math.floor(others.length / 2)
+  return [...others.slice(0, half), hub, ...others.slice(half)]
 }
 
 interface Union {
