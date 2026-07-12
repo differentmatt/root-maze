@@ -309,7 +309,7 @@ function Legend() {
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-amber-400" />{' '}
-        adopted / step (radial); dashed sky in graph
+        non-biological (step / adopted / foster)
       </span>
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-0.5 w-5 border-t-2 border-dashed border-zinc-400" />{' '}

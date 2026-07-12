@@ -126,7 +126,7 @@ export default function GraphCanvas({
         .join(',') +
       '|' +
       shownEdges
-        .map((e) => `${e.fromPerson}>${e.toPerson}`)
+        .map((e) => `${e.fromPerson}>${e.toPerson}:${e.edgeKind}`)
         .sort()
         .join(','),
     [mode, effectiveFocus, shownNodes, shownEdges],
