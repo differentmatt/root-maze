@@ -520,11 +520,19 @@ export default function GraphCanvas({
                 {linked && !isMe && (
                   <circle cx={NODE_R - 4} cy={-NODE_R + 4} r={3.5} fill="#34d399" />
                 )}
+                {/* A halo the color of the canvas, painted *under* the glyphs
+                    (paint-order: stroke), so a label stays legible where an edge
+                    runs behind it — in the top-down graph view a parent's edge
+                    drops straight down through the name below its node. */}
                 <text
                   y={34}
                   textAnchor="middle"
                   fontSize={13}
                   fill={selected ? '#f4f4f5' : '#d4d4d8'}
+                  stroke="#18181b"
+                  strokeWidth={3}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
                 >
                   {label}
                 </text>
