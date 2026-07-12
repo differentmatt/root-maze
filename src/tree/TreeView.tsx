@@ -240,12 +240,9 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
               Views
             </h3>
             <p>
-              <span className="text-zinc-100">Tree</span> — everyone, laid out
-              by generation.
-            </p>
-            <p>
-              <span className="text-zinc-100">Focus</span> — zoom in on one
-              person and their close family; tap anyone to re-center on them.
+              <span className="text-zinc-100">Focus</span> — the default: zoom in
+              on one person and their close family; tap anyone to re-center on
+              them.
             </p>
             <p>
               <span className="text-zinc-100">Radial</span> — one person at the
@@ -260,6 +257,10 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
               their children under a small junction dot. Parents sit above their
               children with no overlap; good for seeing everyone together on a
               portrait screen.
+            </p>
+            <p>
+              <span className="text-zinc-100">Tree</span> — everyone, laid out
+              by generation.
             </p>
           </section>
 

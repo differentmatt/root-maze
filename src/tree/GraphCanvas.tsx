@@ -64,7 +64,7 @@ export default function GraphCanvas({
   meNodeId?: string | null
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
-  const [mode, setMode] = useState<ViewMode>('tree')
+  const [mode, setMode] = useState<ViewMode>('focus')
   // Who the focus/radial views center on. Null until the user picks someone (or
   // has a claimed "me" node), at which point it defaults sensibly below.
   const [focusId, setFocusId] = useState<string | null>(null)
@@ -562,9 +562,6 @@ export default function GraphCanvas({
         aria-label="Graph view"
         className="absolute left-2 top-2 flex overflow-hidden rounded-md border border-zinc-700 bg-zinc-900/90 text-xs"
       >
-        <ModeButton active={mode === 'tree'} onClick={() => setMode('tree')}>
-          Tree
-        </ModeButton>
         <ModeButton active={mode === 'focus'} onClick={enterFocus}>
           Focus
         </ModeButton>
@@ -573,6 +570,9 @@ export default function GraphCanvas({
         </ModeButton>
         <ModeButton active={mode === 'graph'} onClick={() => setMode('graph')}>
           Graph
+        </ModeButton>
+        <ModeButton active={mode === 'tree'} onClick={() => setMode('tree')}>
+          Tree
         </ModeButton>
       </div>
     </div>
