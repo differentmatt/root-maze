@@ -96,7 +96,16 @@ export default function App() {
               {decodeEmail(credential) ?? 'your account'}
             </span>
             <button
-              onClick={clearCredential}
+              onClick={() => {
+                // Disable One Tap auto-select before clearing so a returning
+                // user is not silently signed straight back in after sign-out.
+                // The 401 path in api.ts calls clearCredential() directly,
+                // leaving auto-select active so the app can silently recover.
+                if (typeof google !== 'undefined' && google.accounts?.id) {
+                  google.accounts.id.disableAutoSelect()
+                }
+                clearCredential()
+              }}
               className="shrink-0 text-sm text-zinc-400 hover:text-zinc-200"
             >
               Sign out

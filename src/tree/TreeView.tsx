@@ -219,8 +219,12 @@ function GraphLoading() {
 // edit panel, so the add→edit hand-off never looks like nothing happened.
 function OpeningPerson() {
   return (
-    <div className="flex items-center justify-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-500">
-      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-center justify-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-500"
+    >
+      <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
       Opening person…
     </div>
   )
@@ -1161,12 +1165,12 @@ function RelationshipsSection({
   const [choice, setChoice] = useState<RelChoice>('child_of')
   const [otherId, setOtherId] = useState('')
   const [subtype, setSubtype] = useState('')
-  const [busyId, setBusyId] = useState<string | null>(null)
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function removeEdge(edgeId: string) {
-    setBusyId(edgeId)
+    setBusyIds((prev) => new Set(prev).add(edgeId))
     setError(null)
     try {
       await deleteEdge(groupId, edgeId)
@@ -1174,7 +1178,7 @@ function RelationshipsSection({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove')
     } finally {
-      setBusyId(null)
+      setBusyIds((prev) => { const s = new Set(prev); s.delete(edgeId); return s })
     }
   }
 
@@ -1201,7 +1205,7 @@ function RelationshipsSection({
   // person, i.e. a `child_of` edge. Mirror the existing parent's subtype (the
   // one this suggestion is the partner of) rather than defaulting to biological.
   async function addSuggestedParent(nodeId: string, subtype: string) {
-    setBusyId(nodeId)
+    setBusyIds((prev) => new Set(prev).add(nodeId))
     setError(null)
     try {
       await createEdge(
@@ -1212,7 +1216,7 @@ function RelationshipsSection({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add')
     } finally {
-      setBusyId(null)
+      setBusyIds((prev) => { const s = new Set(prev); s.delete(nodeId); return s })
     }
   }
 
@@ -1231,11 +1235,11 @@ function RelationshipsSection({
               </span>
               <button
                 onClick={() => removeEdge(e.edgeId)}
-                disabled={busyId === e.edgeId}
+                disabled={busyIds.has(e.edgeId)}
                 className="flex shrink-0 items-center gap-1 text-xs text-zinc-500 hover:text-red-400 disabled:opacity-40"
               >
-                {busyId === e.edgeId && <Spinner />}
-                {busyId === e.edgeId ? 'Removing…' : 'Remove'}
+                {busyIds.has(e.edgeId) && <Spinner />}
+                {busyIds.has(e.edgeId) ? 'Removing…' : 'Remove'}
               </button>
             </li>
           ))}
@@ -1278,10 +1282,10 @@ function RelationshipsSection({
                 </span>
                 <button
                   onClick={() => addSuggestedParent(s.nodeId, s.subtype)}
-                  disabled={busyId === s.nodeId}
+                  disabled={busyIds.has(s.nodeId)}
                   className="flex shrink-0 items-center gap-1.5 rounded-md border border-sky-800 px-2 py-1 text-xs text-sky-200 hover:bg-sky-900/40 disabled:opacity-40"
                 >
-                  {busyId === s.nodeId && <Spinner />}
+                  {busyIds.has(s.nodeId) && <Spinner />}
                   Add as parent
                 </button>
               </li>

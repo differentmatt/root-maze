@@ -19,4 +19,8 @@ declare namespace google.accounts.id {
   function initialize(config: InitializeConfig): void
   function renderButton(parent: HTMLElement, options: ButtonConfig): void
   function prompt(): void
+  // Prevents One Tap from automatically re-issuing a token on the next page
+  // load; call this before clearing the credential on an explicit sign-out so
+  // the user is not immediately signed back in.
+  function disableAutoSelect(): void
 }
