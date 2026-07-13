@@ -7,6 +7,13 @@ const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
 // client (index.html) loads async, so on a cold load `google` is often still
 // undefined when we mount — poll until it's ready rather than giving up after
 // one try (which left the button missing until a manual reload).
+//
+// A Google ID token is only valid for ~1 hour and there's no refresh token, so
+// after it expires (or is cleared) the app drops back to signed-out. To spare a
+// returning user from having to click the button again on every refresh, we
+// enable One Tap `auto_select` and fire `prompt()`: if they've signed in before
+// and still have a Google session, One Tap silently re-issues a token and calls
+// our callback, so they land straight back in the app.
 export default function AuthButton() {
   const btnRef = useRef<HTMLDivElement>(null)
   const [ready, setReady] = useState(false)
@@ -22,12 +29,16 @@ export default function AuthButton() {
       google.accounts.id.initialize({
         client_id: CLIENT_ID as string,
         callback: (response) => setCredential(response.credential),
+        auto_select: true,
       })
       google.accounts.id.renderButton(btnRef.current, {
         theme: 'filled_black',
         size: 'large',
         shape: 'pill',
       })
+      // Attempt a silent, automatic re-sign-in for a returning user. Harmless if
+      // they've never signed in (One Tap simply doesn't appear).
+      google.accounts.id.prompt()
       setReady(true)
       return true
     }

@@ -6,6 +6,10 @@ declare namespace google.accounts.id {
   interface InitializeConfig {
     client_id: string
     callback: (response: CredentialResponse) => void
+    // When true, One Tap automatically re-issues a token for a returning user
+    // (one who previously signed in) without a click, so a page refresh doesn't
+    // force them to sign in again.
+    auto_select?: boolean
   }
   interface ButtonConfig {
     theme?: 'outline' | 'filled_blue' | 'filled_black'

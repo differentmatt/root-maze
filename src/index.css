@@ -8,6 +8,16 @@ body,
   height: 100%;
 }
 
+html,
+body {
+  /* Kill the horizontal rubber-band: on the Tree screen the graph canvas can
+     nudge the page sideways (and it snaps back). Clamp any accidental
+     horizontal overflow and disable side-to-side overscroll so the whole
+     screen can't be dragged left/right. */
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
 body {
   margin: 0;
   background-color: #09090b; /* zinc-950 */

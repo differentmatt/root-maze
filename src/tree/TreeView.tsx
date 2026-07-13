@@ -72,6 +72,9 @@ export default function TreeView({ group }: { group: Group }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isFull, setIsFull] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
+  // True between adding a person and the reload that makes them show up in the
+  // graph, so the edit panel can render a wait indicator instead of a blank gap.
+  const [openingPerson, setOpeningPerson] = useState(false)
 
   const reload = useCallback(async () => {
     try {
@@ -136,15 +139,19 @@ export default function TreeView({ group }: { group: Group }) {
 
       {status.state === 'ready' && (
         <>
-          <GraphCanvas
-            nodes={graph.nodes}
-            edges={graph.edges}
-            selectedId={selectedId}
-            onSelect={selectPerson}
-            isFull={isFull}
-            onFullscreenChange={setIsFull}
-            meNodeId={myNodeId}
-          />
+          {/* Full-bleed: the graph reaches the screen edges (cancels the page's
+              horizontal padding) so the tree gets the whole width to breathe. */}
+          <div className="-mx-5">
+            <GraphCanvas
+              nodes={graph.nodes}
+              edges={graph.edges}
+              selectedId={selectedId}
+              onSelect={selectPerson}
+              isFull={isFull}
+              onFullscreenChange={setIsFull}
+              meNodeId={myNodeId}
+            />
+          </div>
 
           <div className="flex justify-end">
             <button
@@ -161,7 +168,9 @@ export default function TreeView({ group }: { group: Group }) {
           {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
 
           {/* Editing a person replaces the add-person form so the screen stays
-              focused on that person. */}
+              focused on that person. A just-added person isn't in the graph
+              until the reload lands, so bridge that gap with a wait indicator
+              rather than briefly flashing an empty add form. */}
           {selected ? (
             <PersonPanel
               key={selected.nodeId}
@@ -178,12 +187,16 @@ export default function TreeView({ group }: { group: Group }) {
               }}
               onClose={() => setSelectedId(null)}
             />
+          ) : openingPerson ? (
+            <OpeningPerson />
           ) : (
             <AddPersonForm
               groupId={group.groupId}
-              onAdded={(newId) => {
+              onAdded={async (newId) => {
                 setSelectedId(newId)
-                reload()
+                setOpeningPerson(true)
+                await reload()
+                setOpeningPerson(false)
               }}
             />
           )}
@@ -198,6 +211,17 @@ function GraphLoading() {
     <div className="flex h-64 flex-col items-center justify-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 text-sm text-zinc-500">
       <span className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
       Loading family graph…
+    </div>
+  )
+}
+
+// Shown in the moment between adding a person and the reload that surfaces their
+// edit panel, so the add→edit hand-off never looks like nothing happened.
+function OpeningPerson() {
+  return (
+    <div className="flex items-center justify-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-500">
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
+      Opening person…
     </div>
   )
 }
@@ -1208,9 +1232,10 @@ function RelationshipsSection({
               <button
                 onClick={() => removeEdge(e.edgeId)}
                 disabled={busyId === e.edgeId}
-                className="text-xs text-zinc-500 hover:text-red-400 disabled:opacity-40"
+                className="flex shrink-0 items-center gap-1 text-xs text-zinc-500 hover:text-red-400 disabled:opacity-40"
               >
-                Remove
+                {busyId === e.edgeId && <Spinner />}
+                {busyId === e.edgeId ? 'Removing…' : 'Remove'}
               </button>
             </li>
           ))}
