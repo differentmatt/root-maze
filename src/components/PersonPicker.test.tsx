@@ -56,4 +56,67 @@ describe('PersonPicker', () => {
     fireEvent.click(screen.getByText('— none —'))
     expect(onChange).toHaveBeenCalledWith(null)
   })
+
+  const sectioned = [
+    { id: 'b', label: 'Bob Byron', section: 'suggested' as const },
+    { id: 'a', label: 'Ada Lovelace', section: 'all' as const },
+    { id: 'c', label: 'Cara Stone', section: 'all' as const },
+  ]
+
+  it('renders non-selectable section headers when options are grouped', () => {
+    render(<PersonPicker options={sectioned} value={null} onChange={() => {}} ariaLabel="pick" />)
+    fireEvent.click(screen.getByLabelText('pick'))
+    expect(screen.getByText('Suggested')).toBeInTheDocument()
+    expect(screen.getByText('All people')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Suggested' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'All people' })).toBeInTheDocument()
+    // Headers carry role=presentation, so only the real people are options.
+    expect(screen.getAllByRole('option')).toHaveLength(3)
+  })
+
+  it('keeps the suggested option pinned first even though it sorts later', () => {
+    render(<PersonPicker options={sectioned} value={null} onChange={() => {}} ariaLabel="pick" />)
+    fireEvent.click(screen.getByLabelText('pick'))
+    const labels = screen.getAllByRole('option').map((el) => el.textContent)
+    expect(labels).toEqual(['Bob Byron', 'Ada Lovelace', 'Cara Stone'])
+  })
+
+  it('Enter activates the first option, skipping the header', () => {
+    const onChange = vi.fn()
+    render(<PersonPicker options={sectioned} value={null} onChange={onChange} ariaLabel="pick" />)
+    fireEvent.click(screen.getByLabelText('pick'))
+    fireEvent.keyDown(screen.getByPlaceholderText('Type to filter…'), { key: 'Enter' })
+    expect(onChange).toHaveBeenCalledWith('b')
+  })
+
+  it('ranks a prefix match ahead of a mid-word match', () => {
+    const opts = [
+      { id: '1', label: 'Diana' },
+      { id: '2', label: 'Ann' },
+    ]
+    render(<PersonPicker options={opts} value={null} onChange={() => {}} ariaLabel="pick" />)
+    fireEvent.click(screen.getByLabelText('pick'))
+    fireEvent.change(screen.getByPlaceholderText('Type to filter…'), {
+      target: { value: 'an' },
+    })
+    // Both contain "an"; "Ann" (prefix) should rank above "Diana" (mid-word).
+    const labels = screen.getAllByRole('option').map((el) => el.textContent)
+    expect(labels).toEqual(['Ann', 'Diana'])
+  })
+
+  it('uses the best match across repeated occurrences in a label', () => {
+    const opts = [
+      { id: '1', label: 'Diana Ann' },
+      { id: '2', label: 'Jo Ann' },
+    ]
+    render(<PersonPicker options={opts} value={null} onChange={() => {}} ariaLabel="pick" />)
+    fireEvent.click(screen.getByLabelText('pick'))
+    fireEvent.change(screen.getByPlaceholderText('Type to filter…'), {
+      target: { value: 'an' },
+    })
+    // Both labels have a word-start match ("Ann"), so they should tie and keep
+    // their original order instead of penalizing the earlier mid-word hit.
+    const labels = screen.getAllByRole('option').map((el) => el.textContent)
+    expect(labels).toEqual(['Diana Ann', 'Jo Ann'])
+  })
 })
