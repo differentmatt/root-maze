@@ -1169,6 +1169,10 @@ function RelationshipsSection({
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  function clearBusyId(id: string) {
+    setBusyIds((prev) => { const s = new Set(prev); s.delete(id); return s })
+  }
+
   async function removeEdge(edgeId: string) {
     setBusyIds((prev) => new Set(prev).add(edgeId))
     setError(null)
@@ -1178,7 +1182,7 @@ function RelationshipsSection({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove')
     } finally {
-      setBusyIds((prev) => { const s = new Set(prev); s.delete(edgeId); return s })
+      clearBusyId(edgeId)
     }
   }
 
@@ -1216,7 +1220,7 @@ function RelationshipsSection({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add')
     } finally {
-      setBusyIds((prev) => { const s = new Set(prev); s.delete(nodeId); return s })
+      clearBusyId(nodeId)
     }
   }
 
