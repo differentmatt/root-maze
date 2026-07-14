@@ -149,6 +149,7 @@ function ImportRow({ group }: { group: Group }) {
         disabled={state.phase === 'previewing' || state.phase === 'committing'}
         onFile={onFile}
       />
+      <ImageToGedcomNote />
       {state.phase === 'previewing' && (
         <p className="text-sm text-zinc-400">Reading file…</p>
       )}
@@ -605,6 +606,56 @@ function NewGroupFromFile({
       >
         {status === 'working' ? 'Creating…' : 'Create & import'}
       </button>
+    </div>
+  )
+}
+
+// --- "No GEDCOM file? Make one with an AI" help note ---------------------
+
+// Many people only have a photo, screenshot, or hand-drawn sketch of their
+// family tree — not a GEDCOM file. This collapsible note tells them they can ask
+// an AI assistant (e.g. Claude) to turn that image into GEDCOM they can import
+// here, which is often the fastest way to get an existing tree into the app.
+function ImageToGedcomNote() {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex flex-col gap-2 text-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="self-start text-zinc-500 hover:text-zinc-300"
+        aria-expanded={open}
+      >
+        {open ? '▾' : '▸'} Only have a photo of a family tree?
+      </button>
+      {open && (
+        <div className="flex flex-col gap-2 rounded-md border border-zinc-800 bg-zinc-950/40 p-3 text-zinc-400">
+          <p>
+            No GEDCOM file? An AI assistant like{' '}
+            <span className="text-zinc-200">Claude</span> can read a photo,
+            screenshot, or scan of a family tree and turn it into one.
+          </p>
+          <ol className="ml-4 list-decimal space-y-1">
+            <li>Upload your family-tree image to the assistant.</li>
+            <li>
+              Ask it to{' '}
+              <span className="text-zinc-300">
+                “convert this family tree into a GEDCOM 5.5.1 file”
+              </span>
+              .
+            </li>
+            <li>
+              Save its reply as a{' '}
+              <span className="text-zinc-300">.ged</span> file, then import it
+              above.
+            </li>
+          </ol>
+          <p className="text-zinc-500">
+            Double-check names and dates after importing — reading handwriting or
+            a photo isn’t always perfect.
+          </p>
+        </div>
+      )}
     </div>
   )
 }

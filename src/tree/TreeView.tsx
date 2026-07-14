@@ -72,6 +72,9 @@ export default function TreeView({ group }: { group: Group }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [isFull, setIsFull] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
+  // True between adding a person and the reload that makes them show up in the
+  // graph, so the edit panel can render a wait indicator instead of a blank gap.
+  const [openingPerson, setOpeningPerson] = useState(false)
 
   const reload = useCallback(async () => {
     try {
@@ -136,15 +139,19 @@ export default function TreeView({ group }: { group: Group }) {
 
       {status.state === 'ready' && (
         <>
-          <GraphCanvas
-            nodes={graph.nodes}
-            edges={graph.edges}
-            selectedId={selectedId}
-            onSelect={selectPerson}
-            isFull={isFull}
-            onFullscreenChange={setIsFull}
-            meNodeId={myNodeId}
-          />
+          {/* Full-bleed: the graph reaches the screen edges (cancels the page's
+              horizontal padding) so the tree gets the whole width to breathe. */}
+          <div className="-mx-5">
+            <GraphCanvas
+              nodes={graph.nodes}
+              edges={graph.edges}
+              selectedId={selectedId}
+              onSelect={selectPerson}
+              isFull={isFull}
+              onFullscreenChange={setIsFull}
+              meNodeId={myNodeId}
+            />
+          </div>
 
           <div className="flex justify-end">
             <button
@@ -161,7 +168,9 @@ export default function TreeView({ group }: { group: Group }) {
           {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
 
           {/* Editing a person replaces the add-person form so the screen stays
-              focused on that person. */}
+              focused on that person. A just-added person isn't in the graph
+              until the reload lands, so bridge that gap with a wait indicator
+              rather than briefly flashing an empty add form. */}
           {selected ? (
             <PersonPanel
               key={selected.nodeId}
@@ -178,12 +187,16 @@ export default function TreeView({ group }: { group: Group }) {
               }}
               onClose={() => setSelectedId(null)}
             />
+          ) : openingPerson ? (
+            <OpeningPerson />
           ) : (
             <AddPersonForm
               groupId={group.groupId}
-              onAdded={(newId) => {
+              onAdded={async (newId) => {
                 setSelectedId(newId)
-                reload()
+                setOpeningPerson(true)
+                await reload()
+                setOpeningPerson(false)
               }}
             />
           )}
@@ -198,6 +211,21 @@ function GraphLoading() {
     <div className="flex h-64 flex-col items-center justify-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 text-sm text-zinc-500">
       <span className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
       Loading family graph…
+    </div>
+  )
+}
+
+// Shown in the moment between adding a person and the reload that surfaces their
+// edit panel, so the add→edit hand-off never looks like nothing happened.
+function OpeningPerson() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-center justify-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-500"
+    >
+      <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-zinc-700 border-t-zinc-300" />
+      Opening person…
     </div>
   )
 }
@@ -1137,12 +1165,16 @@ function RelationshipsSection({
   const [choice, setChoice] = useState<RelChoice>('child_of')
   const [otherId, setOtherId] = useState('')
   const [subtype, setSubtype] = useState('')
-  const [busyId, setBusyId] = useState<string | null>(null)
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  function clearBusyId(id: string) {
+    setBusyIds((prev) => { const s = new Set(prev); s.delete(id); return s })
+  }
+
   async function removeEdge(edgeId: string) {
-    setBusyId(edgeId)
+    setBusyIds((prev) => new Set(prev).add(edgeId))
     setError(null)
     try {
       await deleteEdge(groupId, edgeId)
@@ -1150,7 +1182,7 @@ function RelationshipsSection({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to remove')
     } finally {
-      setBusyId(null)
+      clearBusyId(edgeId)
     }
   }
 
@@ -1177,7 +1209,7 @@ function RelationshipsSection({
   // person, i.e. a `child_of` edge. Mirror the existing parent's subtype (the
   // one this suggestion is the partner of) rather than defaulting to biological.
   async function addSuggestedParent(nodeId: string, subtype: string) {
-    setBusyId(nodeId)
+    setBusyIds((prev) => new Set(prev).add(nodeId))
     setError(null)
     try {
       await createEdge(
@@ -1188,7 +1220,7 @@ function RelationshipsSection({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to add')
     } finally {
-      setBusyId(null)
+      clearBusyId(nodeId)
     }
   }
 
@@ -1207,10 +1239,11 @@ function RelationshipsSection({
               </span>
               <button
                 onClick={() => removeEdge(e.edgeId)}
-                disabled={busyId === e.edgeId}
-                className="text-xs text-zinc-500 hover:text-red-400 disabled:opacity-40"
+                disabled={busyIds.has(e.edgeId)}
+                className="flex shrink-0 items-center gap-1 text-xs text-zinc-500 hover:text-red-400 disabled:opacity-40"
               >
-                Remove
+                {busyIds.has(e.edgeId) && <Spinner />}
+                {busyIds.has(e.edgeId) ? 'Removing…' : 'Remove'}
               </button>
             </li>
           ))}
@@ -1253,10 +1286,10 @@ function RelationshipsSection({
                 </span>
                 <button
                   onClick={() => addSuggestedParent(s.nodeId, s.subtype)}
-                  disabled={busyId === s.nodeId}
+                  disabled={busyIds.has(s.nodeId)}
                   className="flex shrink-0 items-center gap-1.5 rounded-md border border-sky-800 px-2 py-1 text-xs text-sky-200 hover:bg-sky-900/40 disabled:opacity-40"
                 >
-                  {busyId === s.nodeId && <Spinner />}
+                  {busyIds.has(s.nodeId) && <Spinner />}
                   Add as parent
                 </button>
               </li>

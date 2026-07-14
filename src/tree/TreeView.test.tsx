@@ -18,7 +18,7 @@ vi.mock('../api', async (importOriginal) => ({
   unlinkPersonNode: vi.fn(),
 }))
 
-import { getGraph, getMembers, updateNode, deleteNode, linkPersonNode } from '../api'
+import { getGraph, getMembers, createNode, updateNode, deleteNode, linkPersonNode } from '../api'
 
 const group = { groupId: 'grp_1', name: 'The Lotts', role: 'owner' }
 
@@ -431,6 +431,34 @@ describe('TreeView', () => {
     await waitFor(() => expect(deleteNode).toHaveBeenCalledWith('grp_1', 'nod_a'))
 
     confirmSpy.mockRestore()
+  })
+
+  it('shows "Opening person…" while the reload is pending, then opens the edit panel', async () => {
+    const newPerson = person('nod_new', 'Eve')
+    const updatedGraph: Graph = { nodes: [...graph.nodes, newPerson], edges: graph.edges }
+
+    let resolveReload!: (g: Graph) => void
+    vi.mocked(getGraph)
+      .mockResolvedValueOnce(graph)
+      .mockReturnValueOnce(new Promise<Graph>((r) => { resolveReload = r }))
+    vi.mocked(createNode).mockResolvedValue(newPerson)
+
+    render(<TreeView group={group} />)
+    await waitFor(() => expect(screen.getByText('Add a person')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. Ada'), { target: { value: 'Eve' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add person' }))
+
+    // While the reload is pending, the wait indicator is shown and the add form is gone.
+    await waitFor(() => expect(screen.getByText('Opening person…')).toBeInTheDocument())
+    expect(screen.queryByText('Add a person')).not.toBeInTheDocument()
+
+    // Resolve the reload with the graph that now includes the new person.
+    resolveReload(updatedGraph)
+
+    // The edit panel for Eve should open and the wait indicator should disappear.
+    await waitFor(() => expect(screen.getByDisplayValue('Eve')).toBeInTheDocument())
+    expect(screen.queryByText('Opening person…')).not.toBeInTheDocument()
   })
 })
 
